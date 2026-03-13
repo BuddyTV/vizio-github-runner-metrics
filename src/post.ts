@@ -142,19 +142,29 @@ async function run(): Promise<void> {
             required: false
           }) || `workflow-telemetry-${jobName}`
 
+        logger.info(
+          `Uploading HTML report artifact "${artifactName}" from ${reportPath} (root: ${outputDir}) ...`
+        )
+
         const client = artifact.default
-        await client.uploadArtifact(
+        const uploadResponse = await client.uploadArtifact(
           artifactName,
           [reportPath],
           outputDir
         )
         logger.info(
-          `HTML report uploaded as artifact: ${artifactName}`
+          `HTML report uploaded as artifact: ${artifactName} (id: ${uploadResponse.id}, size: ${uploadResponse.size})`
         )
       } catch (artifactError: any) {
         logger.error(
-          `Unable to upload HTML report artifact: ${artifactError.message}. Report is available at ${reportPath}`
+          `Unable to upload HTML report artifact: ${artifactError.message}`
         )
+        logger.error(
+          `Report is available on the runner filesystem at: ${reportPath}`
+        )
+        if (artifactError.stack) {
+          logger.debug(`Artifact upload stack: ${artifactError.stack}`)
+        }
       }
 
       logger.info(`Interactive HTML report generated: ${reportPath}`)

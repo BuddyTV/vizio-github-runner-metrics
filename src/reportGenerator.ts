@@ -799,7 +799,7 @@ class TimeSeriesChart {
           ctx.lineTo(toCanvasX(filtered[filtered.length - 1].x), top + chartH);
           ctx.lineTo(toCanvasX(filtered[0].x), top + chartH);
           ctx.closePath();
-          ctx.fillStyle = series.color + '33';
+          ctx.fillStyle = series.color + '30';
           ctx.fill();
         }
       });
@@ -885,7 +885,7 @@ class TimeSeriesChart {
         ctx.lineTo(toCanvasX(data[i].x), toCanvasY(prevCum[i] || 0));
       }
       ctx.closePath();
-      ctx.fillStyle = this.config.series[si].color;
+      ctx.fillStyle = this.config.series[si].color + '44';
       ctx.fill();
 
       // Draw line on top
@@ -894,8 +894,8 @@ class TimeSeriesChart {
       for (let i = 1; i < data.length; i++) {
         ctx.lineTo(toCanvasX(data[i].x), toCanvasY(cumulativeY[i]));
       }
-      ctx.strokeStyle = this.config.series[si].color.replace(/[0-9a-f]{2}$/, 'ff');
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = this.config.series[si].color;
+      ctx.lineWidth = 2;
       ctx.stroke();
     }
   }
@@ -1111,8 +1111,8 @@ function renderCharts() {
   if (m.cpu.userLoad.length) {
     new TimeSeriesChart('cpuOverview', {
       series: [
-        { label: 'User Load', color: '#e41a1c', data: m.cpu.userLoad, fill: false },
-        { label: 'System Load', color: '#ff7f00', data: m.cpu.systemLoad, fill: false }
+        { label: 'User Load', color: '#3b82f6', data: m.cpu.userLoad, fill: false },
+        { label: 'System Load', color: '#f59e0b', data: m.cpu.systemLoad, fill: false }
       ],
       yLabel: 'CPU (%)',
       stacked: true
@@ -1121,8 +1121,8 @@ function renderCharts() {
     // CPU - Full
     new TimeSeriesChart('cpuFull', {
       series: [
-        { label: 'User Load', color: '#e41a1c', data: m.cpu.userLoad, fill: false },
-        { label: 'System Load', color: '#ff7f00', data: m.cpu.systemLoad, fill: false }
+        { label: 'User Load', color: '#3b82f6', data: m.cpu.userLoad, fill: false },
+        { label: 'System Load', color: '#f59e0b', data: m.cpu.systemLoad, fill: false }
       ],
       yLabel: 'CPU (%)',
       stacked: true
@@ -1133,8 +1133,8 @@ function renderCharts() {
   if (m.memory.active.length) {
     new TimeSeriesChart('memOverview', {
       series: [
-        { label: 'Used', color: '#377eb8', data: m.memory.active, fill: false },
-        { label: 'Free', color: '#4daf4a', data: m.memory.available, fill: false }
+        { label: 'Used', color: '#8b5cf6', data: m.memory.active, fill: false },
+        { label: 'Free', color: '#10b981', data: m.memory.available, fill: false }
       ],
       yLabel: 'Memory (MB)',
       stacked: true
@@ -1143,8 +1143,8 @@ function renderCharts() {
     // Memory - Full
     new TimeSeriesChart('memFull', {
       series: [
-        { label: 'Used', color: '#377eb8', data: m.memory.active, fill: false },
-        { label: 'Free', color: '#4daf4a', data: m.memory.available, fill: false }
+        { label: 'Used', color: '#8b5cf6', data: m.memory.active, fill: false },
+        { label: 'Free', color: '#10b981', data: m.memory.available, fill: false }
       ],
       yLabel: 'Memory (MB)',
       stacked: true
@@ -1154,13 +1154,13 @@ function renderCharts() {
   // Network
   if (m.networkRead.length) {
     new TimeSeriesChart('netRead', {
-      series: [{ label: 'Read', color: '#be4d25', data: m.networkRead, fill: true }],
+      series: [{ label: 'Read', color: '#06b6d4', data: m.networkRead, fill: true }],
       yLabel: 'MB'
     });
   }
   if (m.networkWrite.length) {
     new TimeSeriesChart('netWrite', {
-      series: [{ label: 'Write', color: '#6c25be', data: m.networkWrite, fill: true }],
+      series: [{ label: 'Write', color: '#f97316', data: m.networkWrite, fill: true }],
       yLabel: 'MB'
     });
   }
@@ -1168,13 +1168,13 @@ function renderCharts() {
   // Disk I/O
   if (m.diskRead.length) {
     new TimeSeriesChart('diskRead', {
-      series: [{ label: 'Read', color: '#be4d25', data: m.diskRead, fill: true }],
+      series: [{ label: 'Read', color: '#ec4899', data: m.diskRead, fill: true }],
       yLabel: 'MB'
     });
   }
   if (m.diskWrite.length) {
     new TimeSeriesChart('diskWrite', {
-      series: [{ label: 'Write', color: '#6c25be', data: m.diskWrite, fill: true }],
+      series: [{ label: 'Write', color: '#14b8a6', data: m.diskWrite, fill: true }],
       yLabel: 'MB'
     });
   }
@@ -1183,8 +1183,8 @@ function renderCharts() {
   if (m.diskSize.used.length) {
     new TimeSeriesChart('diskSize', {
       series: [
-        { label: 'Used', color: '#377eb8', data: m.diskSize.used, fill: false },
-        { label: 'Free', color: '#4daf4a', data: m.diskSize.available, fill: false }
+        { label: 'Used', color: '#6366f1', data: m.diskSize.used, fill: false },
+        { label: 'Free', color: '#22c55e', data: m.diskSize.available, fill: false }
       ],
       yLabel: 'Disk (MB)',
       stacked: true
@@ -1210,10 +1210,10 @@ function renderStepsTimeline() {
   const totalDuration = globalEnd - globalStart || 1;
 
   const colors = {
-    success: '#1a7f37',
-    failure: '#cf222e',
-    skipped: '#8b949e',
-    default: '#0969da'
+    success: getComputedColor('--success'),
+    failure: getComputedColor('--danger'),
+    skipped: getComputedColor('--text-secondary'),
+    default: getComputedColor('--accent')
   };
 
   const container = document.getElementById('stepsTimeline');
@@ -1290,7 +1290,7 @@ function renderProcessTimeline() {
     container.innerHTML = sorted.map(proc => {
       const left = ((proc.startTime - globalStart) / totalDuration * 100);
       const width = Math.max(((proc.duration) / totalDuration * 100), 0.3);
-      const color = proc.exitCode !== 0 ? '#cf222e' : '#0969da';
+      const color = proc.exitCode !== 0 ? getComputedColor('--danger') : getComputedColor('--accent');
 
       return '<div class="timeline-bar-group">' +
         '<div class="timeline-label" title="' + escapeHtmlJs(proc.name) + '">' + escapeHtmlJs(proc.name) + ' (PID: ' + proc.pid + ')</div>' +
