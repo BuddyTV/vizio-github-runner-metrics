@@ -66,6 +66,7 @@ ${getStyles()}
     <button class="tab" data-tab="io">I/O</button>
     <button class="tab" data-tab="disk">Disk</button>
     <button class="tab" data-tab="steps">Steps</button>
+    <button class="tab" data-tab="step-analysis">Step Analysis</button>
     <button class="tab" data-tab="processes">Processes</button>
   </nav>
 
@@ -186,6 +187,19 @@ ${getStyles()}
         <div id="stepsTimeline" class="timeline-container"></div>
       </div>
       <div class="table-container" id="stepsTable"></div>
+    </section>
+
+    <section id="tab-step-analysis" class="panel">
+      <div class="step-analysis-header">
+        <h3>Step-Level Resource Analysis</h3>
+        <p class="text-secondary">Select a step to see its resource consumption and spawned processes during execution.</p>
+      </div>
+      <div class="step-selector-wrap">
+        <select id="stepSelector" class="step-selector">
+          <option value="">— Select a step —</option>
+        </select>
+      </div>
+      <div id="stepAnalysisContent"></div>
     </section>
 
     <section id="tab-processes" class="panel">
@@ -536,6 +550,80 @@ canvas {
 .tooltip .tt-row { display: flex; justify-content: space-between; gap: 16px; }
 .tooltip .tt-label { color: var(--text-secondary); }
 .tooltip .tt-value { font-weight: 600; font-family: monospace; }
+
+.step-analysis-header { margin-bottom: 12px; }
+.step-analysis-header h3 { font-size: 16px; font-weight: 600; }
+.step-analysis-header .text-secondary { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+.step-selector-wrap { margin-bottom: 16px; }
+.step-selector {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  background: var(--bg-card);
+  color: var(--text);
+  outline: none;
+  min-width: 350px;
+  cursor: pointer;
+}
+.step-selector:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(9,105,218,0.15); }
+
+.sa-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.sa-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+.sa-card .sa-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+.sa-card .sa-value { font-size: 20px; font-weight: 700; color: var(--text); }
+.sa-card .sa-unit { font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+
+.sa-charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+@media (max-width: 900px) { .sa-charts-grid { grid-template-columns: 1fr; } }
+
+.sa-chart-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+.sa-chart-box h4 { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.sa-chart-box canvas {
+  width: 100% !important;
+  height: 200px !important;
+  cursor: crosshair;
+}
+
+.sa-proc-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+}
+.sa-proc-section h4 { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+.sa-proc-empty { color: var(--text-secondary); font-size: 13px; padding: 8px 0; }
 
 .input-filter {
   padding: 4px 10px;
@@ -1369,12 +1457,206 @@ function renderProcessTimeline() {
 }
 
 // ==============================
+// Step Analysis
+// ==============================
+function renderStepAnalysis() {
+  const steps = REPORT_DATA.steps;
+  const selector = document.getElementById('stepSelector');
+  const content = document.getElementById('stepAnalysisContent');
+  if (!selector || !content) return;
+
+  if (!steps || !steps.length) {
+    content.innerHTML = '<p style="padding:20px;color:var(--text-secondary)">No step data available. Ensure your workflow has <code>actions: read</code> permission.</p>';
+    selector.style.display = 'none';
+    return;
+  }
+
+  const validSteps = steps.filter(s => s.started_at && s.completed_at);
+  if (!validSteps.length) {
+    content.innerHTML = '<p style="padding:20px;color:var(--text-secondary)">No completed steps found.</p>';
+    return;
+  }
+
+  // Populate selector
+  validSteps.forEach((step, idx) => {
+    const opt = document.createElement('option');
+    opt.value = idx;
+    const dur = new Date(step.completed_at).getTime() - new Date(step.started_at).getTime();
+    const statusIcon = step.conclusion === 'success' ? '✅' : step.conclusion === 'failure' ? '❌' : '⏭';
+    opt.textContent = statusIcon + ' ' + step.name + ' (' + formatDuration(dur) + ')';
+    selector.appendChild(opt);
+  });
+
+  // Step-scoped chart instances (destroyed on re-render)
+  let stepCharts = {};
+
+  selector.addEventListener('change', () => {
+    const idx = selector.value;
+    if (idx === '') { content.innerHTML = ''; return; }
+
+    // Destroy previous step charts
+    Object.keys(stepCharts).forEach(k => { delete charts[k]; });
+    stepCharts = {};
+
+    const step = validSteps[parseInt(idx)];
+    const stepStart = new Date(step.started_at).getTime();
+    const stepEnd = new Date(step.completed_at).getTime();
+    const stepDur = stepEnd - stepStart;
+    const m = REPORT_DATA.metrics;
+
+    // Helper: filter metric data to step time window
+    function inRange(data) {
+      return data.filter(p => p.x >= stepStart && p.x <= stepEnd);
+    }
+
+    // Compute step-scoped metrics
+    const cpuUser = inRange(m.cpu.userLoad);
+    const cpuSys = inRange(m.cpu.systemLoad);
+    const memActive = inRange(m.memory.active);
+    const memAvail = inRange(m.memory.available);
+    const netR = inRange(m.networkRead);
+    const netW = inRange(m.networkWrite);
+    const diskR = inRange(m.diskRead);
+    const diskW = inRange(m.diskWrite);
+
+    const peakCpu = cpuUser.length ? Math.max(...cpuUser.map((p,i) => p.y + (cpuSys[i] ? cpuSys[i].y : 0))) : 0;
+    const avgCpu = cpuUser.length ? cpuUser.reduce((s,p) => s + p.y, 0) / cpuUser.length : 0;
+    const peakMem = memActive.length ? Math.max(...memActive.map(p => p.y)) : 0;
+    const avgMem = memActive.length ? memActive.reduce((s,p) => s + p.y, 0) / memActive.length : 0;
+    const totalNetR = netR.reduce((s,p) => s + p.y, 0);
+    const totalNetW = netW.reduce((s,p) => s + p.y, 0);
+    const totalDiskR = diskR.reduce((s,p) => s + p.y, 0);
+    const totalDiskW = diskW.reduce((s,p) => s + p.y, 0);
+
+    // Processes that ran during this step
+    const stepProcs = (REPORT_DATA.processes || []).filter(p => {
+      const pEnd = p.startTime + p.duration;
+      return p.startTime < stepEnd && pEnd > stepStart;
+    }).sort((a,b) => b.duration - a.duration);
+
+    const statusColor = step.conclusion === 'success' ? 'var(--success)' : step.conclusion === 'failure' ? 'var(--danger)' : 'var(--warning)';
+
+    let html = '';
+
+    // Step info bar
+    html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:10px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius)">';
+    html += '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + statusColor + '"></span>';
+    html += '<strong>' + escapeHtmlJs(step.name) + '</strong>';
+    html += '<span style="color:var(--text-secondary);font-size:13px">' + (step.conclusion || 'running') + '</span>';
+    html += '<span style="color:var(--text-secondary);font-size:13px">|</span>';
+    html += '<span style="font-size:13px">' + formatTime(stepStart) + ' → ' + formatTime(stepEnd) + '</span>';
+    html += '<span style="color:var(--text-secondary);font-size:13px">|</span>';
+    html += '<span style="font-weight:600;font-size:13px">' + formatDuration(stepDur) + '</span>';
+    html += '</div>';
+
+    // Summary cards
+    html += '<div class="sa-overview">';
+    html += '<div class="sa-card"><div class="sa-label">Peak CPU</div><div class="sa-value">' + peakCpu.toFixed(1) + ' <span class="sa-unit">%</span></div></div>';
+    html += '<div class="sa-card"><div class="sa-label">Avg CPU</div><div class="sa-value">' + avgCpu.toFixed(1) + ' <span class="sa-unit">%</span></div></div>';
+    html += '<div class="sa-card"><div class="sa-label">Peak Memory</div><div class="sa-value">' + peakMem.toFixed(0) + ' <span class="sa-unit">MB</span></div></div>';
+    html += '<div class="sa-card"><div class="sa-label">Avg Memory</div><div class="sa-value">' + avgMem.toFixed(0) + ' <span class="sa-unit">MB</span></div></div>';
+    html += '<div class="sa-card"><div class="sa-label">Net Read</div><div class="sa-value">' + totalNetR.toFixed(1) + ' <span class="sa-unit">MB</span></div></div>';
+    html += '<div class="sa-card"><div class="sa-label">Net Write</div><div class="sa-value">' + totalNetW.toFixed(1) + ' <span class="sa-unit">MB</span></div></div>';
+    html += '<div class="sa-card"><div class="sa-label">Disk Read</div><div class="sa-value">' + totalDiskR.toFixed(1) + ' <span class="sa-unit">MB</span></div></div>';
+    html += '<div class="sa-card"><div class="sa-label">Disk Write</div><div class="sa-value">' + totalDiskW.toFixed(1) + ' <span class="sa-unit">MB</span></div></div>';
+    html += '<div class="sa-card"><div class="sa-label">Processes</div><div class="sa-value">' + stepProcs.length + '</div></div>';
+    html += '</div>';
+
+    // Mini charts (unique IDs per step selection to avoid collisions)
+    const ts = Date.now();
+    const cpuId = 'saCpu_' + ts;
+    const memId = 'saMem_' + ts;
+    const netId = 'saNet_' + ts;
+    const diskId = 'saDisk_' + ts;
+
+    html += '<div class="sa-charts-grid">';
+    if (cpuUser.length >= 2) {
+      html += '<div class="sa-chart-box"><h4>CPU Load (%)</h4><canvas id="' + cpuId + '"></canvas></div>';
+    }
+    if (memActive.length >= 2) {
+      html += '<div class="sa-chart-box"><h4>Memory (MB)</h4><canvas id="' + memId + '"></canvas></div>';
+    }
+    if (netR.length >= 2 || netW.length >= 2) {
+      html += '<div class="sa-chart-box"><h4>Network I/O (MB)</h4><canvas id="' + netId + '"></canvas></div>';
+    }
+    if (diskR.length >= 2 || diskW.length >= 2) {
+      html += '<div class="sa-chart-box"><h4>Disk I/O (MB)</h4><canvas id="' + diskId + '"></canvas></div>';
+    }
+    html += '</div>';
+
+    // Process list for this step
+    html += '<div class="sa-proc-section">';
+    html += '<h4>Processes Spawned During Step (' + stepProcs.length + ')</h4>';
+    if (stepProcs.length === 0) {
+      html += '<p class="sa-proc-empty">No processes traced during this step.</p>';
+    } else {
+      html += '<div class="table-container" style="max-height:300px">';
+      html += '<table><thead><tr><th>Name</th><th>PID</th><th>Duration</th><th>Exit Code</th><th>File</th></tr></thead><tbody>';
+      stepProcs.forEach(proc => {
+        html += '<tr>';
+        html += '<td>' + escapeHtmlJs(proc.name) + '</td>';
+        html += '<td>' + proc.pid + '</td>';
+        html += '<td>' + formatDuration(proc.duration) + '</td>';
+        html += '<td style="color:' + (proc.exitCode !== 0 ? 'var(--danger)' : 'inherit') + '">' + proc.exitCode + '</td>';
+        html += '<td>' + escapeHtmlJs(proc.fileName || '') + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+
+    content.innerHTML = html;
+
+    // Create mini charts after DOM is updated
+    setTimeout(() => {
+      if (cpuUser.length >= 2) {
+        stepCharts[cpuId] = true;
+        new TimeSeriesChart(cpuId, {
+          series: [
+            { label: 'User', color: '#3b82f6', data: cpuUser, fill: false },
+            { label: 'System', color: '#f59e0b', data: cpuSys, fill: false }
+          ],
+          yLabel: 'CPU (%)',
+          stacked: true
+        });
+      }
+      if (memActive.length >= 2) {
+        stepCharts[memId] = true;
+        new TimeSeriesChart(memId, {
+          series: [
+            { label: 'Used', color: '#8b5cf6', data: memActive, fill: false },
+            { label: 'Free', color: '#10b981', data: memAvail, fill: false }
+          ],
+          yLabel: 'Memory (MB)',
+          stacked: true
+        });
+      }
+      if (netR.length >= 2 || netW.length >= 2) {
+        const netSeries = [];
+        if (netR.length >= 2) netSeries.push({ label: 'Read', color: '#06b6d4', data: netR, fill: true });
+        if (netW.length >= 2) netSeries.push({ label: 'Write', color: '#f97316', data: netW, fill: true });
+        stepCharts[netId] = true;
+        new TimeSeriesChart(netId, { series: netSeries, yLabel: 'MB' });
+      }
+      if (diskR.length >= 2 || diskW.length >= 2) {
+        const diskSeries = [];
+        if (diskR.length >= 2) diskSeries.push({ label: 'Read', color: '#ec4899', data: diskR, fill: true });
+        if (diskW.length >= 2) diskSeries.push({ label: 'Write', color: '#14b8a6', data: diskW, fill: true });
+        stepCharts[diskId] = true;
+        new TimeSeriesChart(diskId, { series: diskSeries, yLabel: 'MB' });
+      }
+    }, 50);
+  });
+}
+
+// ==============================
 // Initialize
 // ==============================
 renderSummaryCards();
 renderCharts();
 renderStepsTimeline();
 renderProcessTimeline();
+renderStepAnalysis();
 `
 }
 
