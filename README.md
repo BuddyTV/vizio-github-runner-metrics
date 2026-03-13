@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Collect Workflow Telemetry
-        uses: catchpoint/workflow-telemetry-action@v2
+        uses: BuddyTV/vizio-github-runner-metrics@v1
 ```
 
 ### With custom options
@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Collect Workflow Telemetry
-        uses: catchpoint/workflow-telemetry-action@v2
+        uses: BuddyTV/vizio-github-runner-metrics@v1
         with:
           html_report_artifact_name: 'my-pipeline-telemetry'
           theme: 'dark'
@@ -85,7 +85,7 @@ jobs:
 steps:
   - name: Collect Workflow Telemetry
     id: telemetry
-    uses: catchpoint/workflow-telemetry-action@v2
+    uses: BuddyTV/vizio-github-runner-metrics@v1
 
   # ... your build/test steps ...
 
