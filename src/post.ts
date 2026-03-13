@@ -120,46 +120,62 @@ async function run(): Promise<void> {
 
     const currentJob: WorkflowJobType | null = await getCurrentJob()
 
-    if (!currentJob) {
-      logger.error(
-        `Couldn't find current job. So action will not report any data.`
+    if (currentJob) {
+      logger.debug(`Current job: ${JSON.stringify(currentJob)}`)
+    } else {
+      logger.info(
+        `Couldn't find current job info. ` +
+          `Step trace, PR comment, and job summary will be skipped. ` +
+          `Metrics and HTML report will still be generated. ` +
+          `To enable full reporting, add "actions: read" permission to your workflow.`
       )
-      return
     }
 
-    logger.debug(`Current job: ${JSON.stringify(currentJob)}`)
-
-    // Finish step tracer
-    await stepTracer.finish(currentJob)
-    // Finish stat collector
-    await statCollector.finish(currentJob)
-    // Finish process tracer
-    await processTracer.finish(currentJob)
-
-    // Report step tracer
-    const stepTracerContent: string | null = await stepTracer.report(currentJob)
-    // Report stat collector
-    const stepCollectorContent: string | null =
-      await statCollector.report(currentJob)
-    // Report process tracer
-    const procTracerContent: string | null =
-      await processTracer.report(currentJob)
-
-    let allContent = ''
-
-    if (stepTracerContent) {
-      allContent = allContent.concat(stepTracerContent, '\n')
+    // Finish step tracer (needs job info for step data, but safe to call)
+    if (currentJob) {
+      await stepTracer.finish(currentJob)
     }
-    if (stepCollectorContent) {
-      allContent = allContent.concat(stepCollectorContent, '\n')
+    // Finish stat collector (triggers final metric collection - does NOT need job info)
+    try {
+      await statCollector.finish(currentJob as WorkflowJobType)
+    } catch (e: any) {
+      logger.debug(`Stat collector finish: ${e.message}`)
     }
-    if (procTracerContent) {
-      allContent = allContent.concat(procTracerContent, '\n')
+    // Finish process tracer (uses PID from state - does NOT need job info)
+    try {
+      await processTracer.finish(currentJob as WorkflowJobType)
+    } catch (e: any) {
+      logger.debug(`Process tracer finish: ${e.message}`)
     }
 
-    await reportAll(currentJob, allContent)
+    // Report markdown content (PR comment / job summary) — requires job info
+    if (currentJob) {
+      // Report step tracer
+      const stepTracerContent: string | null =
+        await stepTracer.report(currentJob)
+      // Report stat collector
+      const stepCollectorContent: string | null =
+        await statCollector.report(currentJob)
+      // Report process tracer
+      const procTracerContent: string | null =
+        await processTracer.report(currentJob)
 
-    // Generate interactive HTML report
+      let allContent = ''
+
+      if (stepTracerContent) {
+        allContent = allContent.concat(stepTracerContent, '\n')
+      }
+      if (stepCollectorContent) {
+        allContent = allContent.concat(stepCollectorContent, '\n')
+      }
+      if (procTracerContent) {
+        allContent = allContent.concat(procTracerContent, '\n')
+      }
+
+      await reportAll(currentJob, allContent)
+    }
+
+    // Generate interactive HTML report — works with or without job info
     const htmlReportEnabled: string = core.getInput('html_report', {
       required: false
     })
@@ -174,17 +190,24 @@ async function run(): Promise<void> {
         const commit: string =
           (pull_request && pull_request.head && pull_request.head.sha) || sha
 
+        const jobName = currentJob
+          ? currentJob.name
+          : process.env.GITHUB_JOB || job || 'unknown'
+        const jobId = currentJob ? currentJob.id : 0
+
         const reportData: ReportData = {
           workflow,
-          jobName: currentJob.name,
-          jobUrl: `https://github.com/${repo.owner}/${repo.repo}/runs/${currentJob.id}?check_suite_focus=true`,
+          jobName,
+          jobUrl: jobId
+            ? `https://github.com/${repo.owner}/${repo.repo}/runs/${jobId}?check_suite_focus=true`
+            : `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${runId}`,
           commit,
           commitUrl: `https://github.com/${repo.owner}/${repo.repo}/commit/${commit}`,
           runId,
           repo: `${repo.owner}/${repo.repo}`,
           timestamp: new Date().toISOString(),
           metrics: rawMetrics,
-          steps: currentJob.steps || [],
+          steps: currentJob ? currentJob.steps || [] : [],
           processes: parsedCommands,
           theme: core.getInput('theme', { required: false }) || 'light'
         }
@@ -211,7 +234,7 @@ async function run(): Promise<void> {
             const artifactName =
               core.getInput('html_report_artifact_name', {
                 required: false
-              }) || `workflow-telemetry-${currentJob.name}`
+              }) || `workflow-telemetry-${jobName}`
 
             const client = artifact.default
             await client.uploadArtifact(

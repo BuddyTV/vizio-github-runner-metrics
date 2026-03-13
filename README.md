@@ -74,8 +74,11 @@ The action generates a dynamic, self-contained HTML report that is uploaded as a
 
 To use the action, add the following step before the steps you want to track.
 
+> **Permissions:** The action requires `actions: read` to look up the current job's step details. Without it, step traces and PR comments are skipped, but **metrics collection and the HTML report still work**. Add `pull-requests: write` if you want results posted as a PR comment.
+
 ```yaml
 permissions:
+  actions: read
   pull-requests: write
 jobs:
   workflow-telemetry-action:
@@ -89,6 +92,7 @@ jobs:
 
 ```yaml
 permissions:
+  actions: read
   pull-requests: write
 jobs:
   workflow-telemetry-action:
@@ -132,7 +136,7 @@ steps:
 | `proc_trace_chart_show`       | Optional    | Enables showing traced processes in trace chart. Defaults to `true`.
 | `proc_trace_chart_max_count`  | Optional    | Maximum number of processes to be shown in trace chart (applicable if `proc_trace_chart_show` input is `true`). Must be a number. Defaults to `100`.
 | `proc_trace_table_show`       | Optional    | Enables showing traced processes in trace table. Defaults to `true`.
-| `comment_on_pr`               | Optional    | Set to `true` to publish the results as comment to the PR (applicable if workflow run is triggered by PR). Defaults to `true`. <br/> Requires `pull-requests: write` permission.
+| `comment_on_pr`               | Optional    | Set to `true` to publish the results as comment to the PR (applicable if workflow run is triggered by PR). Defaults to `true`. <br/> Requires `pull-requests: write` and `actions: read` permissions.
 | `job_summary`                 | Optional    | Set to `true` to publish the results as part of the [job summary page](https://github.blog/2022-05-09-supercharging-github-actions-with-job-summaries/) of the workflow run. Defaults to `true`.
 | `theme`                       | Optional    | Set to `dark` to generate charts compatible with Github **dark** mode. Also applies to the HTML report. Defaults to `light`.
 | `html_report`                 | Optional    | Set to `true` to generate a self-contained interactive HTML report with zoomable charts. Defaults to `true`.
