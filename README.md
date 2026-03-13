@@ -75,7 +75,7 @@ jobs:
       - name: Collect Workflow Telemetry
         uses: BuddyTV/vizio-github-runner-metrics@v1
         with:
-          html_report_artifact_name: 'my-pipeline-telemetry'
+          html_report_artifact_name: 'appolo-5693-build-telemetry-${{ github.job }}-${{ github.run_id }}'
           theme: 'dark'
 ```
 
