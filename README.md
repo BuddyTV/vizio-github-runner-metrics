@@ -8,6 +8,8 @@ of your GitHub Action workflow runs.
 If the run is triggered via a Pull Request, it will create a comment on the connected PR with the results 
 and/or publishes the results to the job summary. 
 
+The action also generates a **self-contained interactive HTML report** that can be downloaded as a pipeline artifact. The report includes zoomable charts, time range analysis, sortable tables, and a light/dark theme toggle — all in a single `.html` file with zero external dependencies.
+
 The action traces the jobs' step executions and shows them in trace chart,
 
 And collects the following metrics:
@@ -36,9 +38,31 @@ and as trace table with the following information:
 - File name
 - Arguments
 
-### Example Output
+## Interactive HTML Report
 
-An example output of a simple workflow run will look like this.
+The action generates a dynamic, self-contained HTML report that is uploaded as a downloadable GitHub Actions artifact. Unlike the static image charts in the PR comment / job summary, the HTML report provides a rich interactive experience:
+
+- **Zoomable charts** — click-drag to zoom into any time range, scroll wheel to zoom in/out, double-click to reset
+- **Hover tooltips** — see exact metric values at any point in time with crosshair tracking
+- **Overview dashboard** — summary cards showing peak CPU, average CPU, peak memory, total network/disk I/O, step and process counts
+- **Dedicated tabs** — separate views for CPU, Memory, I/O, Disk, Steps, and Processes
+- **Step timeline** — horizontal Gantt-style chart with color-coded status (green=success, red=failure, grey=skipped)
+- **Process timeline** — top 100 processes by duration with real-time filter by name or PID
+- **Sortable tables** — click any column header to sort steps or processes
+- **CSV export** — export CPU, memory, or disk metrics as CSV files for external analysis
+- **Light/dark theme** — toggle between light and dark themes
+- **Downloadable** — save the report locally via the built-in download button; the file is fully self-contained
+
+### How to access the report
+
+1. After your workflow completes, go to the workflow run page
+2. Scroll to the **Artifacts** section
+3. Download the `workflow-telemetry-{job_name}` artifact
+4. Open the `.html` file in any browser
+
+### Example Output (Static — PR Comment / Job Summary)
+
+> **Note:** The static images below are shown in PR comments and job summaries. The interactive HTML report replaces these with zoomable, interactive charts.
 
 ![Step Trace Example](/images/step-trace-example.png)
 
@@ -61,17 +85,64 @@ jobs:
         uses: catchpoint/workflow-telemetry-action@v2
 ```
 
+### With HTML report options
+
+```yaml
+permissions:
+  pull-requests: write
+jobs:
+  workflow-telemetry-action:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect Workflow Telemetry
+        uses: catchpoint/workflow-telemetry-action@v2
+        with:
+          html_report: 'true'
+          html_report_upload_artifact: 'true'
+          html_report_artifact_name: 'my-pipeline-telemetry'
+          theme: 'dark'
+```
+
+### Using report path in subsequent steps
+
+```yaml
+steps:
+  - name: Collect Workflow Telemetry
+    id: telemetry
+    uses: catchpoint/workflow-telemetry-action@v2
+
+  # ... your build/test steps ...
+
+  # The HTML report path is available after the post-action runs.
+  # You can reference it via the outputs:
+  #   steps.telemetry.outputs.html_report_path
+  #   steps.telemetry.outputs.html_report_dir
+```
+
 ## Configuration
 
-| Option                       | Requirement       | Description
-|------------------------------| ---               | ---
-| `github_token`               | Optional          | An alternative GitHub token, other than the default provided by GitHub Actions runner.
-| `metric_frequency`           | Optional          | Metric collection frequency in seconds. Must be a number. Defaults to `5`.
-| `proc_trace_min_duration`    | Optional          | Puts minimum limit for process execution duration to be traced. Must be a number. Defaults to `-1` which means process duration filtering is not applied.
-| `proc_trace_sys_enable`      | Optional          | Enables tracing default system processes (`aws`, `cat`, `sed`, ...). Defaults to `false`.
-| `proc_trace_chart_show`      | Optional          | Enables showing traced processes in trace chart. Defaults to `true`.
-| `proc_trace_chart_max_count` | Optional          | Maximum number of processes to be shown in trace chart (applicable if `proc_trace_chart_show` input is `true`). Must be a number. Defaults to `100`.
-| `proc_trace_table_show`      | Optional          | Enables showing traced processes in trace table. Defaults to `true`.
-| `comment_on_pr`              | Optional          | Set to `true` to publish the results as comment to the PR (applicable if workflow run is triggered by PR). Defaults to `true`. <br/> Requires `pull-requests: write` permission
-| `job_summary`                | Optional          | Set to `true` to publish the results as part of the [job summary page](https://github.blog/2022-05-09-supercharging-github-actions-with-job-summaries/) of the workflow run. Defaults to `true`.
-| `theme`                      | Optional          | Set to `dark` to generate charts compatible with Github **dark** mode. Defaults to `light`.
+### Inputs
+
+| Option                        | Requirement | Description
+|-------------------------------|-------------|---
+| `github_token`                | Optional    | An alternative GitHub token, other than the default provided by GitHub Actions runner.
+| `metric_frequency`            | Optional    | Metric collection frequency in seconds. Must be a number. Defaults to `5`.
+| `proc_trace_min_duration`     | Optional    | Puts minimum limit for process execution duration to be traced. Must be a number. Defaults to `-1` which means process duration filtering is not applied.
+| `proc_trace_sys_enable`       | Optional    | Enables tracing default system processes (`aws`, `cat`, `sed`, ...). Defaults to `false`.
+| `proc_trace_chart_show`       | Optional    | Enables showing traced processes in trace chart. Defaults to `true`.
+| `proc_trace_chart_max_count`  | Optional    | Maximum number of processes to be shown in trace chart (applicable if `proc_trace_chart_show` input is `true`). Must be a number. Defaults to `100`.
+| `proc_trace_table_show`       | Optional    | Enables showing traced processes in trace table. Defaults to `true`.
+| `comment_on_pr`               | Optional    | Set to `true` to publish the results as comment to the PR (applicable if workflow run is triggered by PR). Defaults to `true`. <br/> Requires `pull-requests: write` permission.
+| `job_summary`                 | Optional    | Set to `true` to publish the results as part of the [job summary page](https://github.blog/2022-05-09-supercharging-github-actions-with-job-summaries/) of the workflow run. Defaults to `true`.
+| `theme`                       | Optional    | Set to `dark` to generate charts compatible with Github **dark** mode. Also applies to the HTML report. Defaults to `light`.
+| `html_report`                 | Optional    | Set to `true` to generate a self-contained interactive HTML report with zoomable charts. Defaults to `true`.
+| `html_report_output_dir`      | Optional    | Directory to write the HTML report file. Defaults to `$RUNNER_TEMP/workflow-telemetry-reports`.
+| `html_report_upload_artifact` | Optional    | Set to `true` to upload the HTML report as a GitHub Actions artifact. Defaults to `true`.
+| `html_report_artifact_name`   | Optional    | Name for the uploaded HTML report artifact. Defaults to `workflow-telemetry-{job_name}`.
+
+### Outputs
+
+| Output             | Description
+|--------------------|---
+| `html_report_path` | Absolute path to the generated HTML report file.
+| `html_report_dir`  | Directory containing the generated HTML report.
