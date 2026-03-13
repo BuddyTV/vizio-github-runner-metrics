@@ -5,12 +5,10 @@ A GitHub Action to track and monitor the
 - resource metrics 
 - and process activities 
 of your GitHub Action workflow runs. 
-If the run is triggered via a Pull Request, it will create a comment on the connected PR with the results 
-and/or publishes the results to the job summary. 
 
-The action also generates a **self-contained interactive HTML report** that can be downloaded as a pipeline artifact. The report includes zoomable charts, time range analysis, sortable tables, and a light/dark theme toggle — all in a single `.html` file with zero external dependencies.
+The action generates a **self-contained interactive HTML report** that is uploaded as a downloadable pipeline artifact. The report includes zoomable charts, time range analysis, sortable tables, and a light/dark theme toggle — all in a single `.html` file with zero external dependencies. **No static images or markdown reports are posted to PR comments or job summaries.**
 
-The action traces the jobs' step executions and shows them in trace chart,
+The action traces the jobs' step executions and shows them in the HTML report,
 
 And collects the following metrics:
 - CPU Load (user and system) in percentage
@@ -18,29 +16,17 @@ And collects the following metrics:
 - Network I/O (read and write) in MB
 - Disk I/O (read and write) in MB
 
-And traces the process executions (only supported on `Ubuntu`) 
-
-as trace chart with the following information:
+And traces the process executions (only supported on `Ubuntu`) with the following information:
 - Name
-- Start time
-- Duration (in ms)
-- Finish time
-- Exit status as success or fail (highlighted as red)
-
-and as trace table with the following information:
-- Name
-- Id
-- Parent id
-- User id
+- PID / Parent PID / User ID
 - Start time
 - Duration (in ms)
 - Exit code
-- File name
-- Arguments
+- File name and arguments
 
 ## Interactive HTML Report
 
-The action generates a dynamic, self-contained HTML report that is uploaded as a downloadable GitHub Actions artifact. Unlike the static image charts in the PR comment / job summary, the HTML report provides a rich interactive experience:
+The HTML report provides a rich interactive experience:
 
 - **Zoomable charts** — click-drag to zoom into any time range, scroll wheel to zoom in/out, double-click to reset
 - **Hover tooltips** — see exact metric values at any point in time with crosshair tracking
@@ -60,26 +46,15 @@ The action generates a dynamic, self-contained HTML report that is uploaded as a
 3. Download the `workflow-telemetry-{job_name}` artifact
 4. Open the `.html` file in any browser
 
-### Example Output (Static — PR Comment / Job Summary)
-
-> **Note:** The static images below are shown in PR comments and job summaries. The interactive HTML report replaces these with zoomable, interactive charts.
-
-![Step Trace Example](/images/step-trace-example.png)
-
-![Metrics Example](/images/metrics-example.png)
-
-![Process Trace Example](/images/proc-trace-example.png)
-
 ## Usage
 
 To use the action, add the following step before the steps you want to track.
 
-> **Permissions:** The action requires `actions: read` to look up the current job's step details. Without it, step traces and PR comments are skipped, but **metrics collection and the HTML report still work**. Add `pull-requests: write` if you want results posted as a PR comment.
+> **Permissions:** The action requires `actions: read` to look up the current job's step details. Without it, step data will not appear in the HTML report, but metrics and process trace data will still be collected.
 
 ```yaml
 permissions:
   actions: read
-  pull-requests: write
 jobs:
   workflow-telemetry-action:
     runs-on: ubuntu-latest
@@ -88,12 +63,11 @@ jobs:
         uses: catchpoint/workflow-telemetry-action@v2
 ```
 
-### With HTML report options
+### With custom options
 
 ```yaml
 permissions:
   actions: read
-  pull-requests: write
 jobs:
   workflow-telemetry-action:
     runs-on: ubuntu-latest
@@ -101,8 +75,6 @@ jobs:
       - name: Collect Workflow Telemetry
         uses: catchpoint/workflow-telemetry-action@v2
         with:
-          html_report: 'true'
-          html_report_upload_artifact: 'true'
           html_report_artifact_name: 'my-pipeline-telemetry'
           theme: 'dark'
 ```
@@ -133,15 +105,8 @@ steps:
 | `metric_frequency`            | Optional    | Metric collection frequency in seconds. Must be a number. Defaults to `5`.
 | `proc_trace_min_duration`     | Optional    | Puts minimum limit for process execution duration to be traced. Must be a number. Defaults to `-1` which means process duration filtering is not applied.
 | `proc_trace_sys_enable`       | Optional    | Enables tracing default system processes (`aws`, `cat`, `sed`, ...). Defaults to `false`.
-| `proc_trace_chart_show`       | Optional    | Enables showing traced processes in trace chart. Defaults to `true`.
-| `proc_trace_chart_max_count`  | Optional    | Maximum number of processes to be shown in trace chart (applicable if `proc_trace_chart_show` input is `true`). Must be a number. Defaults to `100`.
-| `proc_trace_table_show`       | Optional    | Enables showing traced processes in trace table. Defaults to `true`.
-| `comment_on_pr`               | Optional    | Set to `true` to publish the results as comment to the PR (applicable if workflow run is triggered by PR). Defaults to `true`. <br/> Requires `pull-requests: write` and `actions: read` permissions.
-| `job_summary`                 | Optional    | Set to `true` to publish the results as part of the [job summary page](https://github.blog/2022-05-09-supercharging-github-actions-with-job-summaries/) of the workflow run. Defaults to `true`.
-| `theme`                       | Optional    | Set to `dark` to generate charts compatible with Github **dark** mode. Also applies to the HTML report. Defaults to `light`.
-| `html_report`                 | Optional    | Set to `true` to generate a self-contained interactive HTML report with zoomable charts. Defaults to `true`.
+| `theme`                       | Optional    | Set to `dark` to generate the HTML report in dark mode. Defaults to `light`.
 | `html_report_output_dir`      | Optional    | Directory to write the HTML report file. Defaults to `$RUNNER_TEMP/workflow-telemetry-reports`.
-| `html_report_upload_artifact` | Optional    | Set to `true` to upload the HTML report as a GitHub Actions artifact. Defaults to `true`.
 | `html_report_artifact_name`   | Optional    | Name for the uploaded HTML report artifact. Defaults to `workflow-telemetry-{job_name}`.
 
 ### Outputs

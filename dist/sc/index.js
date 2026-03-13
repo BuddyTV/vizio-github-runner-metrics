@@ -28321,7 +28321,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getRawMetrics = exports.report = exports.finish = exports.start = void 0;
+exports.getRawMetrics = exports.finish = exports.start = void 0;
 const child_process_1 = __nccwpck_require__(2081);
 const path_1 = __importDefault(__nccwpck_require__(1017));
 const axios_1 = __importDefault(__nccwpck_require__(8757));
@@ -28335,68 +28335,6 @@ function triggerStatCollect() {
         if (logger.isDebugEnabled()) {
             logger.debug(`Triggered stat collect: ${JSON.stringify(response.data)}`);
         }
-    });
-}
-function computeAvg(points) {
-    if (!points.length)
-        return 0;
-    return points.reduce((sum, p) => sum + p.y, 0) / points.length;
-}
-function computeMax(points) {
-    if (!points.length)
-        return 0;
-    return Math.max(...points.map(p => p.y));
-}
-function computeSum(points) {
-    return points.reduce((sum, p) => sum + p.y, 0);
-}
-function fmt(val, decimals = 1) {
-    return val.toFixed(decimals);
-}
-function reportWorkflowMetrics() {
-    return __awaiter(this, void 0, void 0, function* () {
-        const { userLoadX, systemLoadX } = yield getCPUStats();
-        const { activeMemoryX, availableMemoryX } = yield getMemoryStats();
-        const { networkReadX, networkWriteX } = yield getNetworkStats();
-        const { diskReadX, diskWriteX } = yield getDiskStats();
-        const { diskAvailableX, diskUsedX } = yield getDiskSizeStats();
-        const postContentItems = [];
-        // CPU summary
-        if (userLoadX && userLoadX.length) {
-            const peakUser = computeMax(userLoadX);
-            const avgUser = computeAvg(userLoadX);
-            const peakSystem = computeMax(systemLoadX);
-            const avgSystem = computeAvg(systemLoadX);
-            postContentItems.push('### CPU Metrics', '', '| Metric | Peak | Average |', '|---|---|---|', `| User Load | ${fmt(peakUser)}% | ${fmt(avgUser)}% |`, `| System Load | ${fmt(peakSystem)}% | ${fmt(avgSystem)}% |`, '');
-        }
-        // Memory summary
-        if (activeMemoryX && activeMemoryX.length) {
-            const peakUsed = computeMax(activeMemoryX);
-            const avgUsed = computeAvg(activeMemoryX);
-            const totalMem = activeMemoryX[0].y + (availableMemoryX[0] ? availableMemoryX[0].y : 0);
-            postContentItems.push('### Memory Metrics', '', '| Metric | Value |', '|---|---|', `| Total Memory | ${fmt(totalMem, 0)} MB |`, `| Peak Used | ${fmt(peakUsed, 0)} MB |`, `| Avg Used | ${fmt(avgUsed, 0)} MB |`, '');
-        }
-        // IO summary
-        const hasNetwork = networkReadX && networkReadX.length;
-        const hasDisk = diskReadX && diskReadX.length;
-        if (hasNetwork || hasDisk) {
-            postContentItems.push('### IO Metrics', '', '| Metric | Read | Write |', '|---|---|---|');
-            if (hasNetwork) {
-                postContentItems.push(`| Network I/O | ${fmt(computeSum(networkReadX))} MB | ${fmt(computeSum(networkWriteX))} MB |`);
-            }
-            if (hasDisk) {
-                postContentItems.push(`| Disk I/O | ${fmt(computeSum(diskReadX))} MB | ${fmt(computeSum(diskWriteX))} MB |`);
-            }
-            postContentItems.push('');
-        }
-        // Disk size summary
-        if (diskUsedX && diskUsedX.length && diskAvailableX && diskAvailableX.length) {
-            const lastUsed = diskUsedX[diskUsedX.length - 1].y;
-            const lastAvailable = diskAvailableX[diskAvailableX.length - 1].y;
-            postContentItems.push('### Disk Usage', '', '| Metric | Value |', '|---|---|', `| Used | ${fmt(lastUsed, 0)} MB |`, `| Available | ${fmt(lastAvailable, 0)} MB |`, '');
-        }
-        postContentItems.push('', '> 📊 **Interactive charts with zoom, tooltips, and time range analysis are available in the HTML report artifact.**');
-        return postContentItems.join('\n');
     });
 }
 function getCPUStats() {
@@ -28564,22 +28502,6 @@ function finish(currentJob) {
     });
 }
 exports.finish = finish;
-function report(currentJob) {
-    return __awaiter(this, void 0, void 0, function* () {
-        logger.info(`Reporting stat collector result ...`);
-        try {
-            const postContent = yield reportWorkflowMetrics();
-            logger.info(`Reported stat collector result`);
-            return postContent;
-        }
-        catch (error) {
-            logger.error('Unable to report stat collector result');
-            logger.error(error);
-            return null;
-        }
-    });
-}
-exports.report = report;
 function getRawMetrics() {
     return __awaiter(this, void 0, void 0, function* () {
         logger.info(`Getting raw metrics for HTML report ...`);

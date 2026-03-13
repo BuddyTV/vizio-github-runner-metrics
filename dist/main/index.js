@@ -5211,244 +5211,6 @@ exports.getProxyForUrl = getProxyForUrl;
 
 /***/ }),
 
-/***/ 3988:
-/***/ ((__unused_webpack_module, exports) => {
-
-/* global window, exports, define */
-
-!function() {
-    'use strict'
-
-    var re = {
-        not_string: /[^s]/,
-        not_bool: /[^t]/,
-        not_type: /[^T]/,
-        not_primitive: /[^v]/,
-        number: /[diefg]/,
-        numeric_arg: /[bcdiefguxX]/,
-        json: /[j]/,
-        not_json: /[^j]/,
-        text: /^[^\x25]+/,
-        modulo: /^\x25{2}/,
-        placeholder: /^\x25(?:([1-9]\d*)\$|\(([^)]+)\))?(\+)?(0|'[^$])?(-)?(\d+)?(?:\.(\d+))?([b-gijostTuvxX])/,
-        key: /^([a-z_][a-z_\d]*)/i,
-        key_access: /^\.([a-z_][a-z_\d]*)/i,
-        index_access: /^\[(\d+)\]/,
-        sign: /^[+-]/
-    }
-
-    function sprintf(key) {
-        // `arguments` is not an array, but should be fine for this call
-        return sprintf_format(sprintf_parse(key), arguments)
-    }
-
-    function vsprintf(fmt, argv) {
-        return sprintf.apply(null, [fmt].concat(argv || []))
-    }
-
-    function sprintf_format(parse_tree, argv) {
-        var cursor = 1, tree_length = parse_tree.length, arg, output = '', i, k, ph, pad, pad_character, pad_length, is_positive, sign
-        for (i = 0; i < tree_length; i++) {
-            if (typeof parse_tree[i] === 'string') {
-                output += parse_tree[i]
-            }
-            else if (typeof parse_tree[i] === 'object') {
-                ph = parse_tree[i] // convenience purposes only
-                if (ph.keys) { // keyword argument
-                    arg = argv[cursor]
-                    for (k = 0; k < ph.keys.length; k++) {
-                        if (arg == undefined) {
-                            throw new Error(sprintf('[sprintf] Cannot access property "%s" of undefined value "%s"', ph.keys[k], ph.keys[k-1]))
-                        }
-                        arg = arg[ph.keys[k]]
-                    }
-                }
-                else if (ph.param_no) { // positional argument (explicit)
-                    arg = argv[ph.param_no]
-                }
-                else { // positional argument (implicit)
-                    arg = argv[cursor++]
-                }
-
-                if (re.not_type.test(ph.type) && re.not_primitive.test(ph.type) && arg instanceof Function) {
-                    arg = arg()
-                }
-
-                if (re.numeric_arg.test(ph.type) && (typeof arg !== 'number' && isNaN(arg))) {
-                    throw new TypeError(sprintf('[sprintf] expecting number but found %T', arg))
-                }
-
-                if (re.number.test(ph.type)) {
-                    is_positive = arg >= 0
-                }
-
-                switch (ph.type) {
-                    case 'b':
-                        arg = parseInt(arg, 10).toString(2)
-                        break
-                    case 'c':
-                        arg = String.fromCharCode(parseInt(arg, 10))
-                        break
-                    case 'd':
-                    case 'i':
-                        arg = parseInt(arg, 10)
-                        break
-                    case 'j':
-                        arg = JSON.stringify(arg, null, ph.width ? parseInt(ph.width) : 0)
-                        break
-                    case 'e':
-                        arg = ph.precision ? parseFloat(arg).toExponential(ph.precision) : parseFloat(arg).toExponential()
-                        break
-                    case 'f':
-                        arg = ph.precision ? parseFloat(arg).toFixed(ph.precision) : parseFloat(arg)
-                        break
-                    case 'g':
-                        arg = ph.precision ? String(Number(arg.toPrecision(ph.precision))) : parseFloat(arg)
-                        break
-                    case 'o':
-                        arg = (parseInt(arg, 10) >>> 0).toString(8)
-                        break
-                    case 's':
-                        arg = String(arg)
-                        arg = (ph.precision ? arg.substring(0, ph.precision) : arg)
-                        break
-                    case 't':
-                        arg = String(!!arg)
-                        arg = (ph.precision ? arg.substring(0, ph.precision) : arg)
-                        break
-                    case 'T':
-                        arg = Object.prototype.toString.call(arg).slice(8, -1).toLowerCase()
-                        arg = (ph.precision ? arg.substring(0, ph.precision) : arg)
-                        break
-                    case 'u':
-                        arg = parseInt(arg, 10) >>> 0
-                        break
-                    case 'v':
-                        arg = arg.valueOf()
-                        arg = (ph.precision ? arg.substring(0, ph.precision) : arg)
-                        break
-                    case 'x':
-                        arg = (parseInt(arg, 10) >>> 0).toString(16)
-                        break
-                    case 'X':
-                        arg = (parseInt(arg, 10) >>> 0).toString(16).toUpperCase()
-                        break
-                }
-                if (re.json.test(ph.type)) {
-                    output += arg
-                }
-                else {
-                    if (re.number.test(ph.type) && (!is_positive || ph.sign)) {
-                        sign = is_positive ? '+' : '-'
-                        arg = arg.toString().replace(re.sign, '')
-                    }
-                    else {
-                        sign = ''
-                    }
-                    pad_character = ph.pad_char ? ph.pad_char === '0' ? '0' : ph.pad_char.charAt(1) : ' '
-                    pad_length = ph.width - (sign + arg).length
-                    pad = ph.width ? (pad_length > 0 ? pad_character.repeat(pad_length) : '') : ''
-                    output += ph.align ? sign + arg + pad : (pad_character === '0' ? sign + pad + arg : pad + sign + arg)
-                }
-            }
-        }
-        return output
-    }
-
-    var sprintf_cache = Object.create(null)
-
-    function sprintf_parse(fmt) {
-        if (sprintf_cache[fmt]) {
-            return sprintf_cache[fmt]
-        }
-
-        var _fmt = fmt, match, parse_tree = [], arg_names = 0
-        while (_fmt) {
-            if ((match = re.text.exec(_fmt)) !== null) {
-                parse_tree.push(match[0])
-            }
-            else if ((match = re.modulo.exec(_fmt)) !== null) {
-                parse_tree.push('%')
-            }
-            else if ((match = re.placeholder.exec(_fmt)) !== null) {
-                if (match[2]) {
-                    arg_names |= 1
-                    var field_list = [], replacement_field = match[2], field_match = []
-                    if ((field_match = re.key.exec(replacement_field)) !== null) {
-                        field_list.push(field_match[1])
-                        while ((replacement_field = replacement_field.substring(field_match[0].length)) !== '') {
-                            if ((field_match = re.key_access.exec(replacement_field)) !== null) {
-                                field_list.push(field_match[1])
-                            }
-                            else if ((field_match = re.index_access.exec(replacement_field)) !== null) {
-                                field_list.push(field_match[1])
-                            }
-                            else {
-                                throw new SyntaxError('[sprintf] failed to parse named argument key')
-                            }
-                        }
-                    }
-                    else {
-                        throw new SyntaxError('[sprintf] failed to parse named argument key')
-                    }
-                    match[2] = field_list
-                }
-                else {
-                    arg_names |= 2
-                }
-                if (arg_names === 3) {
-                    throw new Error('[sprintf] mixing positional and named placeholders is not (yet) supported')
-                }
-
-                parse_tree.push(
-                    {
-                        placeholder: match[0],
-                        param_no:    match[1],
-                        keys:        match[2],
-                        sign:        match[3],
-                        pad_char:    match[4],
-                        align:       match[5],
-                        width:       match[6],
-                        precision:   match[7],
-                        type:        match[8]
-                    }
-                )
-            }
-            else {
-                throw new SyntaxError('[sprintf] unexpected placeholder')
-            }
-            _fmt = _fmt.substring(match[0].length)
-        }
-        return sprintf_cache[fmt] = parse_tree
-    }
-
-    /**
-     * export to either browser or node.js
-     */
-    /* eslint-disable quote-props */
-    if (true) {
-        exports.sprintf = sprintf
-        exports.vsprintf = vsprintf
-    }
-    if (typeof window !== 'undefined') {
-        window['sprintf'] = sprintf
-        window['vsprintf'] = vsprintf
-
-        if (typeof define === 'function' && define['amd']) {
-            define(function() {
-                return {
-                    'sprintf': sprintf,
-                    'vsprintf': vsprintf
-                }
-            })
-        }
-    }
-    /* eslint-enable quote-props */
-}(); // eslint-disable-line
-
-
-/***/ }),
-
 /***/ 9318:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -44685,20 +44447,17 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getParsedCommands = exports.report = exports.finish = exports.start = void 0;
+exports.getParsedCommands = exports.finish = exports.start = void 0;
 const child_process_1 = __nccwpck_require__(2081);
 const path_1 = __importDefault(__nccwpck_require__(1017));
 const core = __importStar(__nccwpck_require__(2186));
 const systeminformation_1 = __importDefault(__nccwpck_require__(9284));
-const sprintf_js_1 = __nccwpck_require__(3988);
 const procTraceParser_1 = __nccwpck_require__(9576);
 const logger = __importStar(__nccwpck_require__(4636));
 const PROC_TRACER_PID_KEY = 'PROC_TRACER_PID';
 const PROC_TRACER_OUTPUT_FILE_NAME = 'proc-trace.out';
 const PROC_TRACER_BINARY_NAME_UBUNTU_20 = 'proc_tracer_ubuntu-20';
 const PROC_TRACER_BINARY_NAME_UBUNTU_22 = 'proc_tracer_ubuntu-22';
-const DEFAULT_PROC_TRACE_CHART_MAX_COUNT = 100;
-const GHA_FILE_NAME_PREFIX = '/home/runner/work/_actions/';
 let finished = false;
 function getProcessTracerBinaryName() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -44720,23 +44479,6 @@ function getProcessTracerBinaryName() {
         logger.info(`Process tracing disabled because of unsupported OS: ${JSON.stringify(osInfo)}`);
         return null;
     });
-}
-function getExtraProcessInfo(command) {
-    // Check whether this is node process with args
-    if (command.name === 'node' && command.args.length > 1) {
-        const arg1 = command.args[1];
-        // Check whether this is Node.js GHA process
-        if (arg1.startsWith(GHA_FILE_NAME_PREFIX)) {
-            const actionFile = arg1.substring(GHA_FILE_NAME_PREFIX.length);
-            const idx1 = actionFile.indexOf('/');
-            const idx2 = actionFile.indexOf('/', idx1 + 1);
-            if (idx1 >= 0 && idx2 > idx1) {
-                // If we could find a valid GHA name, use it as extra info
-                return actionFile.substring(idx1 + 1, idx2);
-            }
-        }
-    }
-    return null;
 }
 ///////////////////////////
 function start() {
@@ -44798,102 +44540,6 @@ function finish(currentJob) {
     });
 }
 exports.finish = finish;
-function report(currentJob) {
-    return __awaiter(this, void 0, void 0, function* () {
-        logger.info(`Reporting process tracer result ...`);
-        if (!finished) {
-            logger.info(`Skipped reporting process tracer since process tracer didn't finished`);
-            return null;
-        }
-        try {
-            const procTraceOutFilePath = path_1.default.join(__dirname, '../proc-tracer', PROC_TRACER_OUTPUT_FILE_NAME);
-            logger.info(`Getting process tracer result from file ${procTraceOutFilePath} ...`);
-            let procTraceMinDuration = -1;
-            const procTraceMinDurationInput = core.getInput('proc_trace_min_duration');
-            if (procTraceMinDurationInput) {
-                const minProcDurationVal = parseInt(procTraceMinDurationInput);
-                if (Number.isInteger(minProcDurationVal)) {
-                    procTraceMinDuration = minProcDurationVal;
-                }
-            }
-            const procTraceSysEnable = core.getInput('proc_trace_sys_enable') === 'true';
-            const procTraceChartShow = core.getInput('proc_trace_chart_show') === 'true';
-            const procTraceChartMaxCountInput = parseInt(core.getInput('proc_trace_chart_max_count'));
-            const procTraceChartMaxCount = Number.isInteger(procTraceChartMaxCountInput)
-                ? procTraceChartMaxCountInput
-                : DEFAULT_PROC_TRACE_CHART_MAX_COUNT;
-            const procTraceTableShow = core.getInput('proc_trace_table_show') === 'true';
-            const completedCommands = yield (0, procTraceParser_1.parse)(procTraceOutFilePath, {
-                minDuration: procTraceMinDuration,
-                traceSystemProcesses: procTraceSysEnable
-            });
-            ///////////////////////////////////////////////////////////////////////////
-            let chartContent = '';
-            if (procTraceChartShow) {
-                chartContent = chartContent.concat('gantt', '\n');
-                chartContent = chartContent.concat('\t', `title ${currentJob.name}`, '\n');
-                chartContent = chartContent.concat('\t', `dateFormat x`, '\n');
-                chartContent = chartContent.concat('\t', `axisFormat %H:%M:%S`, '\n');
-                const filteredCommands = [...completedCommands]
-                    .sort((a, b) => {
-                    return -(a.duration - b.duration);
-                })
-                    .slice(0, procTraceChartMaxCount)
-                    .sort((a, b) => {
-                    let result = a.startTime - b.startTime;
-                    if (result === 0 && a.order && b.order) {
-                        result = a.order - b.order;
-                    }
-                    return result;
-                });
-                for (const command of filteredCommands) {
-                    const extraProcessInfo = getExtraProcessInfo(command);
-                    const escapedName = command.name.replace(/:/g, '#colon;');
-                    if (extraProcessInfo) {
-                        chartContent = chartContent.concat('\t', `${escapedName} (${extraProcessInfo}) : `);
-                    }
-                    else {
-                        chartContent = chartContent.concat('\t', `${escapedName} : `);
-                    }
-                    if (command.exitCode !== 0) {
-                        // to show red
-                        chartContent = chartContent.concat('crit, ');
-                    }
-                    const startTime = command.startTime;
-                    const finishTime = command.startTime + command.duration;
-                    chartContent = chartContent.concat(`${Math.min(startTime, finishTime)}, ${finishTime}`, '\n');
-                }
-            }
-            ///////////////////////////////////////////////////////////////////////////
-            let tableContent = '';
-            if (procTraceTableShow) {
-                const commandInfos = [];
-                commandInfos.push((0, sprintf_js_1.sprintf)('%-12s %-16s %7s %7s %7s %15s %15s %10s %-20s', 'TIME', 'NAME', 'UID', 'PID', 'PPID', 'START TIME', 'DURATION (ms)', 'EXIT CODE', 'FILE NAME + ARGS'));
-                for (const command of completedCommands) {
-                    commandInfos.push((0, sprintf_js_1.sprintf)('%-12s %-16s %7d %7d %7d %15d %15d %10d %s %s', command.ts, command.name, command.uid, command.pid, command.ppid, command.startTime, command.duration, command.exitCode, command.fileName, command.args.join(' ')));
-                }
-                tableContent = commandInfos.join('\n');
-            }
-            ///////////////////////////////////////////////////////////////////////////
-            const postContentItems = ['', '### Process Trace'];
-            if (procTraceChartShow) {
-                postContentItems.push('', `#### Top ${procTraceChartMaxCount} processes with highest duration`, '', '```mermaid' + '\n' + chartContent + '\n' + '```');
-            }
-            if (procTraceTableShow) {
-                postContentItems.push('', `#### All processes with detail`, '', '```' + '\n' + tableContent + '\n' + '```');
-            }
-            const postContent = postContentItems.join('\n');
-            logger.info(`Reported process tracer result`);
-            return postContent;
-        }
-        catch (error) {
-            logger.error('Unable to report process tracer result');
-            logger.error(error);
-            return null;
-        }
-    });
-}
-exports.report = report;
 function getParsedCommands() {
     return __awaiter(this, void 0, void 0, function* () {
         if (!finished) {
@@ -44968,7 +44614,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getRawMetrics = exports.report = exports.finish = exports.start = void 0;
+exports.getRawMetrics = exports.finish = exports.start = void 0;
 const child_process_1 = __nccwpck_require__(2081);
 const path_1 = __importDefault(__nccwpck_require__(1017));
 const axios_1 = __importDefault(__nccwpck_require__(8757));
@@ -44982,68 +44628,6 @@ function triggerStatCollect() {
         if (logger.isDebugEnabled()) {
             logger.debug(`Triggered stat collect: ${JSON.stringify(response.data)}`);
         }
-    });
-}
-function computeAvg(points) {
-    if (!points.length)
-        return 0;
-    return points.reduce((sum, p) => sum + p.y, 0) / points.length;
-}
-function computeMax(points) {
-    if (!points.length)
-        return 0;
-    return Math.max(...points.map(p => p.y));
-}
-function computeSum(points) {
-    return points.reduce((sum, p) => sum + p.y, 0);
-}
-function fmt(val, decimals = 1) {
-    return val.toFixed(decimals);
-}
-function reportWorkflowMetrics() {
-    return __awaiter(this, void 0, void 0, function* () {
-        const { userLoadX, systemLoadX } = yield getCPUStats();
-        const { activeMemoryX, availableMemoryX } = yield getMemoryStats();
-        const { networkReadX, networkWriteX } = yield getNetworkStats();
-        const { diskReadX, diskWriteX } = yield getDiskStats();
-        const { diskAvailableX, diskUsedX } = yield getDiskSizeStats();
-        const postContentItems = [];
-        // CPU summary
-        if (userLoadX && userLoadX.length) {
-            const peakUser = computeMax(userLoadX);
-            const avgUser = computeAvg(userLoadX);
-            const peakSystem = computeMax(systemLoadX);
-            const avgSystem = computeAvg(systemLoadX);
-            postContentItems.push('### CPU Metrics', '', '| Metric | Peak | Average |', '|---|---|---|', `| User Load | ${fmt(peakUser)}% | ${fmt(avgUser)}% |`, `| System Load | ${fmt(peakSystem)}% | ${fmt(avgSystem)}% |`, '');
-        }
-        // Memory summary
-        if (activeMemoryX && activeMemoryX.length) {
-            const peakUsed = computeMax(activeMemoryX);
-            const avgUsed = computeAvg(activeMemoryX);
-            const totalMem = activeMemoryX[0].y + (availableMemoryX[0] ? availableMemoryX[0].y : 0);
-            postContentItems.push('### Memory Metrics', '', '| Metric | Value |', '|---|---|', `| Total Memory | ${fmt(totalMem, 0)} MB |`, `| Peak Used | ${fmt(peakUsed, 0)} MB |`, `| Avg Used | ${fmt(avgUsed, 0)} MB |`, '');
-        }
-        // IO summary
-        const hasNetwork = networkReadX && networkReadX.length;
-        const hasDisk = diskReadX && diskReadX.length;
-        if (hasNetwork || hasDisk) {
-            postContentItems.push('### IO Metrics', '', '| Metric | Read | Write |', '|---|---|---|');
-            if (hasNetwork) {
-                postContentItems.push(`| Network I/O | ${fmt(computeSum(networkReadX))} MB | ${fmt(computeSum(networkWriteX))} MB |`);
-            }
-            if (hasDisk) {
-                postContentItems.push(`| Disk I/O | ${fmt(computeSum(diskReadX))} MB | ${fmt(computeSum(diskWriteX))} MB |`);
-            }
-            postContentItems.push('');
-        }
-        // Disk size summary
-        if (diskUsedX && diskUsedX.length && diskAvailableX && diskAvailableX.length) {
-            const lastUsed = diskUsedX[diskUsedX.length - 1].y;
-            const lastAvailable = diskAvailableX[diskAvailableX.length - 1].y;
-            postContentItems.push('### Disk Usage', '', '| Metric | Value |', '|---|---|', `| Used | ${fmt(lastUsed, 0)} MB |`, `| Available | ${fmt(lastAvailable, 0)} MB |`, '');
-        }
-        postContentItems.push('', '> 📊 **Interactive charts with zoom, tooltips, and time range analysis are available in the HTML report artifact.**');
-        return postContentItems.join('\n');
     });
 }
 function getCPUStats() {
@@ -45211,22 +44795,6 @@ function finish(currentJob) {
     });
 }
 exports.finish = finish;
-function report(currentJob) {
-    return __awaiter(this, void 0, void 0, function* () {
-        logger.info(`Reporting stat collector result ...`);
-        try {
-            const postContent = yield reportWorkflowMetrics();
-            logger.info(`Reported stat collector result`);
-            return postContent;
-        }
-        catch (error) {
-            logger.error('Unable to report stat collector result');
-            logger.error(error);
-            return null;
-        }
-    });
-}
-exports.report = report;
 function getRawMetrics() {
     return __awaiter(this, void 0, void 0, function* () {
         logger.info(`Getting raw metrics for HTML report ...`);
@@ -45289,57 +44857,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.report = exports.finish = exports.start = void 0;
+exports.finish = exports.start = void 0;
 const logger = __importStar(__nccwpck_require__(4636));
-function generateTraceChartForSteps(job) {
-    let chartContent = '';
-    /**
-       gantt
-         title Build
-         dateFormat x
-         axisFormat %H:%M:%S
-         Set up job : milestone, 1658073446000, 1658073450000
-         Collect Workflow Telemetry : 1658073450000, 1658073450000
-         Run actions/checkout@v2 : 1658073451000, 1658073453000
-         Set up JDK 8 : 1658073453000, 1658073458000
-         Build with Maven : 1658073459000, 1658073654000
-         Run invalid command : crit, 1658073655000, 1658073654000
-         Archive test results : done, 1658073655000, 1658073654000
-         Post Set up JDK 8 : 1658073655000, 1658073654000
-         Post Run actions/checkout@v2 : 1658073655000, 1658073655000
-    */
-    chartContent = chartContent.concat('gantt', '\n');
-    chartContent = chartContent.concat('\t', `title ${job.name}`, '\n');
-    chartContent = chartContent.concat('\t', `dateFormat x`, '\n');
-    chartContent = chartContent.concat('\t', `axisFormat %H:%M:%S`, '\n');
-    for (const step of job.steps || []) {
-        if (!step.started_at || !step.completed_at) {
-            continue;
-        }
-        chartContent = chartContent.concat('\t', `${step.name.replace(/:/g, '-')} : `);
-        if (step.name === 'Set up job' && step.number === 1) {
-            chartContent = chartContent.concat('milestone, ');
-        }
-        if (step.conclusion === 'failure') {
-            // to show red
-            chartContent = chartContent.concat('crit, ');
-        }
-        else if (step.conclusion === 'skipped') {
-            // to show grey
-            chartContent = chartContent.concat('done, ');
-        }
-        const startTime = new Date(step.started_at).getTime();
-        const finishTime = new Date(step.completed_at).getTime();
-        chartContent = chartContent.concat(`${Math.min(startTime, finishTime)}, ${finishTime}`, '\n');
-    }
-    const postContentItems = [
-        '',
-        '### Step Trace',
-        '',
-        '```mermaid' + '\n' + chartContent + '\n' + '```'
-    ];
-    return postContentItems.join('\n');
-}
 ///////////////////////////
 function start() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -45371,25 +44890,6 @@ function finish(currentJob) {
     });
 }
 exports.finish = finish;
-function report(currentJob) {
-    return __awaiter(this, void 0, void 0, function* () {
-        logger.info(`Reporting step tracer result ...`);
-        if (!currentJob) {
-            return null;
-        }
-        try {
-            const postContent = generateTraceChartForSteps(currentJob);
-            logger.info(`Reported step tracer result`);
-            return postContent;
-        }
-        catch (error) {
-            logger.error('Unable to report step tracer result');
-            logger.error(error);
-            return null;
-        }
-    });
-}
-exports.report = report;
 
 
 /***/ }),

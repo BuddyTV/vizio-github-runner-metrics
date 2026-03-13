@@ -1,9 +1,7 @@
 import * as core from '@actions/core'
 import * as github from '@actions/github'
 import { Octokit } from '@octokit/action'
-import * as fs from 'fs'
 import * as path from 'path'
-import * as stepTracer from './stepTracer'
 import * as statCollector from './statCollector'
 import * as processTracer from './processTracer'
 import * as logger from './logger'
@@ -63,57 +61,6 @@ async function getCurrentJob(): Promise<WorkflowJobType | null> {
   return null
 }
 
-async function reportAll(
-  currentJob: WorkflowJobType,
-  content: string
-): Promise<void> {
-  logger.info(`Reporting all content ...`)
-
-  logger.debug(`Workflow - Job: ${workflow} - ${job}`)
-
-  const jobUrl = `https://github.com/${repo.owner}/${repo.repo}/runs/${currentJob.id}?check_suite_focus=true`
-  logger.debug(`Job url: ${jobUrl}`)
-
-  const title = `## Workflow Telemetry - ${workflow} / ${currentJob.name}`
-  logger.debug(`Title: ${title}`)
-
-  const commit: string =
-    (pull_request && pull_request.head && pull_request.head.sha) || sha
-  logger.debug(`Commit: ${commit}`)
-
-  const commitUrl = `https://github.com/${repo.owner}/${repo.repo}/commit/${commit}`
-  logger.debug(`Commit url: ${commitUrl}`)
-
-  const info =
-    `Workflow telemetry for commit [${commit}](${commitUrl})\n` +
-    `You can access workflow job details [here](${jobUrl})`
-
-  const postContent: string = [title, info, content].join('\n')
-
-  const jobSummary: string = core.getInput('job_summary')
-  if ('true' === jobSummary) {
-    core.summary.addRaw(postContent)
-    await core.summary.write()
-  }
-
-  const commentOnPR: string = core.getInput('comment_on_pr')
-  if (pull_request && 'true' === commentOnPR) {
-    if (logger.isDebugEnabled()) {
-      logger.debug(`Found Pull Request: ${JSON.stringify(pull_request)}`)
-    }
-
-    await octokit.rest.issues.createComment({
-      ...github.context.repo,
-      issue_number: Number(github.context.payload.pull_request?.number),
-      body: postContent
-    })
-  } else {
-    logger.debug(`Couldn't find Pull Request`)
-  }
-
-  logger.info(`Reporting all content completed`)
-}
-
 async function run(): Promise<void> {
   try {
     logger.info(`Finishing ...`)
@@ -125,139 +72,96 @@ async function run(): Promise<void> {
     } else {
       logger.info(
         `Couldn't find current job info. ` +
-          `Step trace, PR comment, and job summary will be skipped. ` +
-          `Metrics and HTML report will still be generated. ` +
-          `To enable full reporting, add "actions: read" permission to your workflow.`
+          `Step details will not be available in the HTML report. ` +
+          `To include step data, add "actions: read" permission to your workflow.`
       )
     }
 
-    // Finish step tracer (needs job info for step data, but safe to call)
-    if (currentJob) {
-      await stepTracer.finish(currentJob)
-    }
-    // Finish stat collector (triggers final metric collection - does NOT need job info)
+    // Finish stat collector (triggers final metric collection)
     try {
       await statCollector.finish(currentJob as WorkflowJobType)
     } catch (e: any) {
       logger.debug(`Stat collector finish: ${e.message}`)
     }
-    // Finish process tracer (uses PID from state - does NOT need job info)
+    // Finish process tracer (uses PID from state)
     try {
       await processTracer.finish(currentJob as WorkflowJobType)
     } catch (e: any) {
       logger.debug(`Process tracer finish: ${e.message}`)
     }
 
-    // Report markdown content (PR comment / job summary) — requires job info
-    if (currentJob) {
-      // Report step tracer
-      const stepTracerContent: string | null =
-        await stepTracer.report(currentJob)
-      // Report stat collector
-      const stepCollectorContent: string | null =
-        await statCollector.report(currentJob)
-      // Report process tracer
-      const procTracerContent: string | null =
-        await processTracer.report(currentJob)
+    // Generate interactive HTML report
+    try {
+      logger.info(`Generating interactive HTML report ...`)
 
-      let allContent = ''
+      const rawMetrics: ReportMetrics = await statCollector.getRawMetrics()
+      const parsedCommands: CompletedCommand[] =
+        await processTracer.getParsedCommands()
 
-      if (stepTracerContent) {
-        allContent = allContent.concat(stepTracerContent, '\n')
+      const commit: string =
+        (pull_request && pull_request.head && pull_request.head.sha) || sha
+
+      const jobName = currentJob
+        ? currentJob.name
+        : process.env.GITHUB_JOB || job || 'unknown'
+      const jobId = currentJob ? currentJob.id : 0
+
+      const reportData: ReportData = {
+        workflow,
+        jobName,
+        jobUrl: jobId
+          ? `https://github.com/${repo.owner}/${repo.repo}/runs/${jobId}?check_suite_focus=true`
+          : `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${runId}`,
+        commit,
+        commitUrl: `https://github.com/${repo.owner}/${repo.repo}/commit/${commit}`,
+        runId,
+        repo: `${repo.owner}/${repo.repo}`,
+        timestamp: new Date().toISOString(),
+        metrics: rawMetrics,
+        steps: currentJob ? currentJob.steps || [] : [],
+        processes: parsedCommands,
+        theme: core.getInput('theme', { required: false }) || 'light'
       }
-      if (stepCollectorContent) {
-        allContent = allContent.concat(stepCollectorContent, '\n')
-      }
-      if (procTracerContent) {
-        allContent = allContent.concat(procTracerContent, '\n')
-      }
 
-      await reportAll(currentJob, allContent)
-    }
+      const outputDir =
+        core.getInput('html_report_output_dir', { required: false }) ||
+        path.join(
+          process.env.RUNNER_TEMP || '/tmp',
+          'workflow-telemetry-reports'
+        )
+      const reportPath = await writeHtmlReport(reportData, outputDir)
 
-    // Generate interactive HTML report — works with or without job info
-    const htmlReportEnabled: string = core.getInput('html_report', {
-      required: false
-    })
-    if (htmlReportEnabled !== 'false') {
+      core.setOutput('html_report_path', reportPath)
+      core.setOutput('html_report_dir', outputDir)
+
+      // Upload as artifact
       try {
-        logger.info(`Generating interactive HTML report ...`)
+        const artifact = await import('@actions/artifact')
+        const artifactName =
+          core.getInput('html_report_artifact_name', {
+            required: false
+          }) || `workflow-telemetry-${jobName}`
 
-        const rawMetrics: ReportMetrics = await statCollector.getRawMetrics()
-        const parsedCommands: CompletedCommand[] =
-          await processTracer.getParsedCommands()
-
-        const commit: string =
-          (pull_request && pull_request.head && pull_request.head.sha) || sha
-
-        const jobName = currentJob
-          ? currentJob.name
-          : process.env.GITHUB_JOB || job || 'unknown'
-        const jobId = currentJob ? currentJob.id : 0
-
-        const reportData: ReportData = {
-          workflow,
-          jobName,
-          jobUrl: jobId
-            ? `https://github.com/${repo.owner}/${repo.repo}/runs/${jobId}?check_suite_focus=true`
-            : `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${runId}`,
-          commit,
-          commitUrl: `https://github.com/${repo.owner}/${repo.repo}/commit/${commit}`,
-          runId,
-          repo: `${repo.owner}/${repo.repo}`,
-          timestamp: new Date().toISOString(),
-          metrics: rawMetrics,
-          steps: currentJob ? currentJob.steps || [] : [],
-          processes: parsedCommands,
-          theme: core.getInput('theme', { required: false }) || 'light'
-        }
-
-        const outputDir =
-          core.getInput('html_report_output_dir', { required: false }) ||
-          path.join(
-            process.env.RUNNER_TEMP || '/tmp',
-            'workflow-telemetry-reports'
-          )
-        const reportPath = await writeHtmlReport(reportData, outputDir)
-
-        core.setOutput('html_report_path', reportPath)
-        core.setOutput('html_report_dir', outputDir)
-
-        // Upload as artifact if enabled
-        const uploadArtifact: string = core.getInput(
-          'html_report_upload_artifact',
-          { required: false }
+        const client = artifact.default
+        await client.uploadArtifact(
+          artifactName,
+          [reportPath],
+          outputDir
         )
-        if (uploadArtifact !== 'false') {
-          try {
-            const artifact = await import('@actions/artifact')
-            const artifactName =
-              core.getInput('html_report_artifact_name', {
-                required: false
-              }) || `workflow-telemetry-${jobName}`
-
-            const client = artifact.default
-            await client.uploadArtifact(
-              artifactName,
-              [reportPath],
-              outputDir
-            )
-            logger.info(
-              `HTML report uploaded as artifact: ${artifactName}`
-            )
-          } catch (artifactError: any) {
-            logger.error(
-              `Unable to upload HTML report artifact: ${artifactError.message}. Report is available at ${reportPath}`
-            )
-          }
-        }
-
-        logger.info(`Interactive HTML report generated: ${reportPath}`)
-      } catch (reportError: any) {
+        logger.info(
+          `HTML report uploaded as artifact: ${artifactName}`
+        )
+      } catch (artifactError: any) {
         logger.error(
-          `Unable to generate HTML report: ${reportError.message}`
+          `Unable to upload HTML report artifact: ${artifactError.message}. Report is available at ${reportPath}`
         )
       }
+
+      logger.info(`Interactive HTML report generated: ${reportPath}`)
+    } catch (reportError: any) {
+      logger.error(
+        `Unable to generate HTML report: ${reportError.message}`
+      )
     }
 
     logger.info(`Finish completed`)
