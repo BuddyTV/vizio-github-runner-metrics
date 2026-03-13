@@ -38,7 +38,7 @@ outputs:
     description: "Directory containing the generated HTML report"
 
 runs:
-  using: "node22"
+  using: "node20"
   main: dist/main/index.js
   post: dist/post/index.js
 branding:
