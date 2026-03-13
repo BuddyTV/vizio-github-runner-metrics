@@ -19,6 +19,7 @@ import {
   StackedAreaGraphOptions,
   WorkflowJobType
 } from './interfaces'
+import { ReportMetrics } from './reportGenerator'
 import * as logger from './logger'
 import { log } from 'console'
 
@@ -496,5 +497,25 @@ export async function report(
     logger.error(error)
 
     return null
+  }
+}
+
+export async function getRawMetrics(): Promise<ReportMetrics> {
+  logger.info(`Getting raw metrics for HTML report ...`)
+
+  const { userLoadX, systemLoadX } = await getCPUStats()
+  const { activeMemoryX, availableMemoryX } = await getMemoryStats()
+  const { networkReadX, networkWriteX } = await getNetworkStats()
+  const { diskReadX, diskWriteX } = await getDiskStats()
+  const { diskAvailableX, diskUsedX } = await getDiskSizeStats()
+
+  return {
+    cpu: { userLoad: userLoadX, systemLoad: systemLoadX },
+    memory: { active: activeMemoryX, available: availableMemoryX },
+    networkRead: networkReadX,
+    networkWrite: networkWriteX,
+    diskRead: diskReadX,
+    diskWrite: diskWriteX,
+    diskSize: { used: diskUsedX, available: diskAvailableX }
   }
 }

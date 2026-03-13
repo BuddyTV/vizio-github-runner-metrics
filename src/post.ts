@@ -1,11 +1,14 @@
 import * as core from '@actions/core'
 import * as github from '@actions/github'
 import { Octokit } from '@octokit/action'
+import * as fs from 'fs'
+import * as path from 'path'
 import * as stepTracer from './stepTracer'
 import * as statCollector from './statCollector'
 import * as processTracer from './processTracer'
 import * as logger from './logger'
-import { WorkflowJobType } from './interfaces'
+import { WorkflowJobType, CompletedCommand } from './interfaces'
+import { ReportData, ReportMetrics, writeHtmlReport } from './reportGenerator'
 
 const { pull_request } = github.context.payload
 const { workflow, job, repo, runId, sha } = github.context
@@ -155,6 +158,84 @@ async function run(): Promise<void> {
     }
 
     await reportAll(currentJob, allContent)
+
+    // Generate interactive HTML report
+    const htmlReportEnabled: string = core.getInput('html_report', {
+      required: false
+    })
+    if (htmlReportEnabled !== 'false') {
+      try {
+        logger.info(`Generating interactive HTML report ...`)
+
+        const rawMetrics: ReportMetrics = await statCollector.getRawMetrics()
+        const parsedCommands: CompletedCommand[] =
+          await processTracer.getParsedCommands()
+
+        const commit: string =
+          (pull_request && pull_request.head && pull_request.head.sha) || sha
+
+        const reportData: ReportData = {
+          workflow,
+          jobName: currentJob.name,
+          jobUrl: `https://github.com/${repo.owner}/${repo.repo}/runs/${currentJob.id}?check_suite_focus=true`,
+          commit,
+          commitUrl: `https://github.com/${repo.owner}/${repo.repo}/commit/${commit}`,
+          runId,
+          repo: `${repo.owner}/${repo.repo}`,
+          timestamp: new Date().toISOString(),
+          metrics: rawMetrics,
+          steps: currentJob.steps || [],
+          processes: parsedCommands,
+          theme: core.getInput('theme', { required: false }) || 'light'
+        }
+
+        const outputDir =
+          core.getInput('html_report_output_dir', { required: false }) ||
+          path.join(
+            process.env.RUNNER_TEMP || '/tmp',
+            'workflow-telemetry-reports'
+          )
+        const reportPath = await writeHtmlReport(reportData, outputDir)
+
+        core.setOutput('html_report_path', reportPath)
+        core.setOutput('html_report_dir', outputDir)
+
+        // Upload as artifact if enabled
+        const uploadArtifact: string = core.getInput(
+          'html_report_upload_artifact',
+          { required: false }
+        )
+        if (uploadArtifact !== 'false') {
+          try {
+            const artifact = await import('@actions/artifact')
+            const artifactName =
+              core.getInput('html_report_artifact_name', {
+                required: false
+              }) || `workflow-telemetry-${currentJob.name}`
+
+            const client = artifact.default
+            await client.uploadArtifact(
+              artifactName,
+              [reportPath],
+              outputDir
+            )
+            logger.info(
+              `HTML report uploaded as artifact: ${artifactName}`
+            )
+          } catch (artifactError: any) {
+            logger.error(
+              `Unable to upload HTML report artifact: ${artifactError.message}. Report is available at ${reportPath}`
+            )
+          }
+        }
+
+        logger.info(`Interactive HTML report generated: ${reportPath}`)
+      } catch (reportError: any) {
+        logger.error(
+          `Unable to generate HTML report: ${reportError.message}`
+        )
+      }
+    }
 
     logger.info(`Finish completed`)
   } catch (error: any) {

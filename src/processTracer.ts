@@ -314,3 +314,38 @@ export async function report(
     return null
   }
 }
+
+export async function getParsedCommands(): Promise<CompletedCommand[]> {
+  if (!finished) {
+    return []
+  }
+  try {
+    const procTraceOutFilePath = path.join(
+      __dirname,
+      '../proc-tracer',
+      PROC_TRACER_OUTPUT_FILE_NAME
+    )
+
+    let procTraceMinDuration = -1
+    const procTraceMinDurationInput: string = core.getInput(
+      'proc_trace_min_duration'
+    )
+    if (procTraceMinDurationInput) {
+      const minProcDurationVal: number = parseInt(procTraceMinDurationInput)
+      if (Number.isInteger(minProcDurationVal)) {
+        procTraceMinDuration = minProcDurationVal
+      }
+    }
+    const procTraceSysEnable: boolean =
+      core.getInput('proc_trace_sys_enable') === 'true'
+
+    return await parse(procTraceOutFilePath, {
+      minDuration: procTraceMinDuration,
+      traceSystemProcesses: procTraceSysEnable
+    })
+  } catch (error: any) {
+    logger.error('Unable to get parsed commands for HTML report')
+    logger.error(error)
+    return []
+  }
+}
