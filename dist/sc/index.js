@@ -2620,14 +2620,17 @@ function useColors() {
 		return false;
 	}
 
+	let m;
+
 	// Is webkit? http://stackoverflow.com/a/16459606/376773
 	// document is undefined in react-native: https://github.com/facebook/react-native/pull/1632
+	// eslint-disable-next-line no-return-assign
 	return (typeof document !== 'undefined' && document.documentElement && document.documentElement.style && document.documentElement.style.WebkitAppearance) ||
 		// Is firebug? http://stackoverflow.com/a/398120/376773
 		(typeof window !== 'undefined' && window.console && (window.console.firebug || (window.console.exception && window.console.table))) ||
 		// Is firefox >= v31?
 		// https://developer.mozilla.org/en-US/docs/Tools/Web_Console#Styling_messages
-		(typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/firefox\/(\d+)/) && parseInt(RegExp.$1, 10) >= 31) ||
+		(typeof navigator !== 'undefined' && navigator.userAgent && (m = navigator.userAgent.toLowerCase().match(/firefox\/(\d+)/)) && parseInt(m[1], 10) >= 31) ||
 		// Double check webkit in userAgent just in case we are in a worker
 		(typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/applewebkit\/(\d+)/));
 }
@@ -2711,7 +2714,7 @@ function save(namespaces) {
 function load() {
 	let r;
 	try {
-		r = exports.storage.getItem('debug');
+		r = exports.storage.getItem('debug') || exports.storage.getItem('DEBUG') ;
 	} catch (error) {
 		// Swallow
 		// XXX (@Qix-) should we be logging these?
@@ -2937,24 +2940,62 @@ function setup(env) {
 		createDebug.names = [];
 		createDebug.skips = [];
 
-		let i;
-		const split = (typeof namespaces === 'string' ? namespaces : '').split(/[\s,]+/);
-		const len = split.length;
+		const split = (typeof namespaces === 'string' ? namespaces : '')
+			.trim()
+			.replace(/\s+/g, ',')
+			.split(',')
+			.filter(Boolean);
 
-		for (i = 0; i < len; i++) {
-			if (!split[i]) {
-				// ignore empty strings
-				continue;
-			}
-
-			namespaces = split[i].replace(/\*/g, '.*?');
-
-			if (namespaces[0] === '-') {
-				createDebug.skips.push(new RegExp('^' + namespaces.slice(1) + '$'));
+		for (const ns of split) {
+			if (ns[0] === '-') {
+				createDebug.skips.push(ns.slice(1));
 			} else {
-				createDebug.names.push(new RegExp('^' + namespaces + '$'));
+				createDebug.names.push(ns);
 			}
 		}
+	}
+
+	/**
+	 * Checks if the given string matches a namespace template, honoring
+	 * asterisks as wildcards.
+	 *
+	 * @param {String} search
+	 * @param {String} template
+	 * @return {Boolean}
+	 */
+	function matchesTemplate(search, template) {
+		let searchIndex = 0;
+		let templateIndex = 0;
+		let starIndex = -1;
+		let matchIndex = 0;
+
+		while (searchIndex < search.length) {
+			if (templateIndex < template.length && (template[templateIndex] === search[searchIndex] || template[templateIndex] === '*')) {
+				// Match character or proceed with wildcard
+				if (template[templateIndex] === '*') {
+					starIndex = templateIndex;
+					matchIndex = searchIndex;
+					templateIndex++; // Skip the '*'
+				} else {
+					searchIndex++;
+					templateIndex++;
+				}
+			} else if (starIndex !== -1) { // eslint-disable-line no-negated-condition
+				// Backtrack to the last '*' and try to match more characters
+				templateIndex = starIndex + 1;
+				matchIndex++;
+				searchIndex = matchIndex;
+			} else {
+				return false; // No match
+			}
+		}
+
+		// Handle trailing '*' in template
+		while (templateIndex < template.length && template[templateIndex] === '*') {
+			templateIndex++;
+		}
+
+		return templateIndex === template.length;
 	}
 
 	/**
@@ -2965,8 +3006,8 @@ function setup(env) {
 	*/
 	function disable() {
 		const namespaces = [
-			...createDebug.names.map(toNamespace),
-			...createDebug.skips.map(toNamespace).map(namespace => '-' + namespace)
+			...createDebug.names,
+			...createDebug.skips.map(namespace => '-' + namespace)
 		].join(',');
 		createDebug.enable('');
 		return namespaces;
@@ -2980,39 +3021,19 @@ function setup(env) {
 	* @api public
 	*/
 	function enabled(name) {
-		if (name[name.length - 1] === '*') {
-			return true;
-		}
-
-		let i;
-		let len;
-
-		for (i = 0, len = createDebug.skips.length; i < len; i++) {
-			if (createDebug.skips[i].test(name)) {
+		for (const skip of createDebug.skips) {
+			if (matchesTemplate(name, skip)) {
 				return false;
 			}
 		}
 
-		for (i = 0, len = createDebug.names.length; i < len; i++) {
-			if (createDebug.names[i].test(name)) {
+		for (const ns of createDebug.names) {
+			if (matchesTemplate(name, ns)) {
 				return true;
 			}
 		}
 
 		return false;
-	}
-
-	/**
-	* Convert regexp to namespace
-	*
-	* @param {RegExp} regxep
-	* @return {String} namespace
-	* @api private
-	*/
-	function toNamespace(regexp) {
-		return regexp.toString()
-			.substring(2, regexp.toString().length - 2)
-			.replace(/\.\*\?$/, '*');
 	}
 
 	/**
@@ -3256,11 +3277,11 @@ function getDate() {
 }
 
 /**
- * Invokes `util.format()` with the specified arguments and writes to stderr.
+ * Invokes `util.formatWithOptions()` with the specified arguments and writes to stderr.
  */
 
 function log(...args) {
-	return process.stderr.write(util.format(...args) + '\n');
+	return process.stderr.write(util.formatWithOptions(exports.inspectOpts, ...args) + '\n');
 }
 
 /**
@@ -4933,7 +4954,7 @@ var y = d * 365.25;
  * @api public
  */
 
-module.exports = function(val, options) {
+module.exports = function (val, options) {
   options = options || {};
   var type = typeof val;
   if (type === 'string' && val.length > 0) {
@@ -28300,15 +28321,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.report = exports.finish = exports.start = void 0;
+exports.getRawMetrics = exports.report = exports.finish = exports.start = void 0;
 const child_process_1 = __nccwpck_require__(2081);
 const path_1 = __importDefault(__nccwpck_require__(1017));
 const axios_1 = __importDefault(__nccwpck_require__(8757));
 const core = __importStar(__nccwpck_require__(2186));
 const logger = __importStar(__nccwpck_require__(4636));
 const STAT_SERVER_PORT = 7777;
-const BLACK = '#000000';
-const WHITE = '#FFFFFF';
 function triggerStatCollect() {
     return __awaiter(this, void 0, void 0, function* () {
         logger.debug('Triggering stat collect ...');
@@ -28318,145 +28337,65 @@ function triggerStatCollect() {
         }
     });
 }
+function computeAvg(points) {
+    if (!points.length)
+        return 0;
+    return points.reduce((sum, p) => sum + p.y, 0) / points.length;
+}
+function computeMax(points) {
+    if (!points.length)
+        return 0;
+    return Math.max(...points.map(p => p.y));
+}
+function computeSum(points) {
+    return points.reduce((sum, p) => sum + p.y, 0);
+}
+function fmt(val, decimals = 1) {
+    return val.toFixed(decimals);
+}
 function reportWorkflowMetrics() {
     return __awaiter(this, void 0, void 0, function* () {
-        const theme = core.getInput('theme', { required: false });
-        let axisColor = BLACK;
-        switch (theme) {
-            case 'light':
-                axisColor = BLACK;
-                break;
-            case 'dark':
-                axisColor = WHITE;
-                break;
-            default:
-                core.warning(`Invalid theme: ${theme}`);
-        }
         const { userLoadX, systemLoadX } = yield getCPUStats();
         const { activeMemoryX, availableMemoryX } = yield getMemoryStats();
         const { networkReadX, networkWriteX } = yield getNetworkStats();
         const { diskReadX, diskWriteX } = yield getDiskStats();
         const { diskAvailableX, diskUsedX } = yield getDiskSizeStats();
-        const cpuLoad = userLoadX && userLoadX.length && systemLoadX && systemLoadX.length
-            ? yield getStackedAreaGraph({
-                label: 'CPU Load (%)',
-                axisColor,
-                areas: [
-                    {
-                        label: 'User Load',
-                        color: '#e41a1c99',
-                        points: userLoadX
-                    },
-                    {
-                        label: 'System Load',
-                        color: '#ff7f0099',
-                        points: systemLoadX
-                    }
-                ]
-            })
-            : null;
-        const memoryUsage = activeMemoryX &&
-            activeMemoryX.length &&
-            availableMemoryX &&
-            availableMemoryX.length
-            ? yield getStackedAreaGraph({
-                label: 'Memory Usage (MB)',
-                axisColor,
-                areas: [
-                    {
-                        label: 'Used',
-                        color: '#377eb899',
-                        points: activeMemoryX
-                    },
-                    {
-                        label: 'Free',
-                        color: '#4daf4a99',
-                        points: availableMemoryX
-                    }
-                ]
-            })
-            : null;
-        const networkIORead = networkReadX && networkReadX.length
-            ? yield getLineGraph({
-                label: 'Network I/O Read (MB)',
-                axisColor,
-                line: {
-                    label: 'Read',
-                    color: '#be4d25',
-                    points: networkReadX
-                }
-            })
-            : null;
-        const networkIOWrite = networkWriteX && networkWriteX.length
-            ? yield getLineGraph({
-                label: 'Network I/O Write (MB)',
-                axisColor,
-                line: {
-                    label: 'Write',
-                    color: '#6c25be',
-                    points: networkWriteX
-                }
-            })
-            : null;
-        const diskIORead = diskReadX && diskReadX.length
-            ? yield getLineGraph({
-                label: 'Disk I/O Read (MB)',
-                axisColor,
-                line: {
-                    label: 'Read',
-                    color: '#be4d25',
-                    points: diskReadX
-                }
-            })
-            : null;
-        const diskIOWrite = diskWriteX && diskWriteX.length
-            ? yield getLineGraph({
-                label: 'Disk I/O Write (MB)',
-                axisColor,
-                line: {
-                    label: 'Write',
-                    color: '#6c25be',
-                    points: diskWriteX
-                }
-            })
-            : null;
-        const diskSizeUsage = diskUsedX && diskUsedX.length && diskAvailableX && diskAvailableX.length
-            ? yield getStackedAreaGraph({
-                label: 'Disk Usage (MB)',
-                axisColor,
-                areas: [
-                    {
-                        label: 'Used',
-                        color: '#377eb899',
-                        points: diskUsedX
-                    },
-                    {
-                        label: 'Free',
-                        color: '#4daf4a99',
-                        points: diskAvailableX
-                    }
-                ]
-            })
-            : null;
         const postContentItems = [];
-        if (cpuLoad) {
-            postContentItems.push('### CPU Metrics', `![${cpuLoad.id}](${cpuLoad.url})`, '');
+        // CPU summary
+        if (userLoadX && userLoadX.length) {
+            const peakUser = computeMax(userLoadX);
+            const avgUser = computeAvg(userLoadX);
+            const peakSystem = computeMax(systemLoadX);
+            const avgSystem = computeAvg(systemLoadX);
+            postContentItems.push('### CPU Metrics', '', '| Metric | Peak | Average |', '|---|---|---|', `| User Load | ${fmt(peakUser)}% | ${fmt(avgUser)}% |`, `| System Load | ${fmt(peakSystem)}% | ${fmt(avgSystem)}% |`, '');
         }
-        if (memoryUsage) {
-            postContentItems.push('### Memory Metrics', `![${memoryUsage.id}](${memoryUsage.url})`, '');
+        // Memory summary
+        if (activeMemoryX && activeMemoryX.length) {
+            const peakUsed = computeMax(activeMemoryX);
+            const avgUsed = computeAvg(activeMemoryX);
+            const totalMem = activeMemoryX[0].y + (availableMemoryX[0] ? availableMemoryX[0].y : 0);
+            postContentItems.push('### Memory Metrics', '', '| Metric | Value |', '|---|---|', `| Total Memory | ${fmt(totalMem, 0)} MB |`, `| Peak Used | ${fmt(peakUsed, 0)} MB |`, `| Avg Used | ${fmt(avgUsed, 0)} MB |`, '');
         }
-        if ((networkIORead && networkIOWrite) || (diskIORead && diskIOWrite)) {
-            postContentItems.push('### IO Metrics', '|               | Read      | Write     |', '|---            |---        |---        |');
+        // IO summary
+        const hasNetwork = networkReadX && networkReadX.length;
+        const hasDisk = diskReadX && diskReadX.length;
+        if (hasNetwork || hasDisk) {
+            postContentItems.push('### IO Metrics', '', '| Metric | Read | Write |', '|---|---|---|');
+            if (hasNetwork) {
+                postContentItems.push(`| Network I/O | ${fmt(computeSum(networkReadX))} MB | ${fmt(computeSum(networkWriteX))} MB |`);
+            }
+            if (hasDisk) {
+                postContentItems.push(`| Disk I/O | ${fmt(computeSum(diskReadX))} MB | ${fmt(computeSum(diskWriteX))} MB |`);
+            }
+            postContentItems.push('');
         }
-        if (networkIORead && networkIOWrite) {
-            postContentItems.push(`| Network I/O   | ![${networkIORead.id}](${networkIORead.url})        | ![${networkIOWrite.id}](${networkIOWrite.url})        |`);
+        // Disk size summary
+        if (diskUsedX && diskUsedX.length && diskAvailableX && diskAvailableX.length) {
+            const lastUsed = diskUsedX[diskUsedX.length - 1].y;
+            const lastAvailable = diskAvailableX[diskAvailableX.length - 1].y;
+            postContentItems.push('### Disk Usage', '', '| Metric | Value |', '|---|---|', `| Used | ${fmt(lastUsed, 0)} MB |`, `| Available | ${fmt(lastAvailable, 0)} MB |`, '');
         }
-        if (diskIORead && diskIOWrite) {
-            postContentItems.push(`| Disk I/O      | ![${diskIORead.id}](${diskIORead.url})              | ![${diskIOWrite.id}](${diskIOWrite.url})              |`);
-        }
-        if (diskSizeUsage) {
-            postContentItems.push('### Disk Size Metrics', `![${diskSizeUsage.id}](${diskSizeUsage.url})`, '');
-        }
+        postContentItems.push('', '> 📊 **Interactive charts with zoom, tooltips, and time range analysis are available in the HTML report artifact.**');
         return postContentItems.join('\n');
     });
 }
@@ -28576,64 +28515,6 @@ function getDiskSizeStats() {
         return { diskAvailableX, diskUsedX };
     });
 }
-function getLineGraph(options) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const payload = {
-            options: {
-                width: 1000,
-                height: 500,
-                xAxis: {
-                    label: 'Time'
-                },
-                yAxis: {
-                    label: options.label
-                },
-                timeTicks: {
-                    unit: 'auto'
-                }
-            },
-            lines: [options.line]
-        };
-        let response = null;
-        try {
-            response = yield axios_1.default.put('https://api.globadge.com/v1/chartgen/line/time', payload);
-        }
-        catch (error) {
-            logger.error(error);
-            logger.error(`getLineGraph ${JSON.stringify(payload)}`);
-        }
-        return response === null || response === void 0 ? void 0 : response.data;
-    });
-}
-function getStackedAreaGraph(options) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const payload = {
-            options: {
-                width: 1000,
-                height: 500,
-                xAxis: {
-                    label: 'Time'
-                },
-                yAxis: {
-                    label: options.label
-                },
-                timeTicks: {
-                    unit: 'auto'
-                }
-            },
-            areas: options.areas
-        };
-        let response = null;
-        try {
-            response = yield axios_1.default.put('https://api.globadge.com/v1/chartgen/stacked-area/time', payload);
-        }
-        catch (error) {
-            logger.error(error);
-            logger.error(`getStackedAreaGraph ${JSON.stringify(payload)}`);
-        }
-        return response === null || response === void 0 ? void 0 : response.data;
-    });
-}
 ///////////////////////////
 function start() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -28699,6 +28580,26 @@ function report(currentJob) {
     });
 }
 exports.report = report;
+function getRawMetrics() {
+    return __awaiter(this, void 0, void 0, function* () {
+        logger.info(`Getting raw metrics for HTML report ...`);
+        const { userLoadX, systemLoadX } = yield getCPUStats();
+        const { activeMemoryX, availableMemoryX } = yield getMemoryStats();
+        const { networkReadX, networkWriteX } = yield getNetworkStats();
+        const { diskReadX, diskWriteX } = yield getDiskStats();
+        const { diskAvailableX, diskUsedX } = yield getDiskSizeStats();
+        return {
+            cpu: { userLoad: userLoadX, systemLoad: systemLoadX },
+            memory: { active: activeMemoryX, available: availableMemoryX },
+            networkRead: networkReadX,
+            networkWrite: networkWriteX,
+            diskRead: diskReadX,
+            diskWrite: diskWriteX,
+            diskSize: { used: diskUsedX, available: diskAvailableX }
+        };
+    });
+}
+exports.getRawMetrics = getRawMetrics;
 
 
 /***/ }),
