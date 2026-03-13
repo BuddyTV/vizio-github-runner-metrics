@@ -6,8 +6,6 @@ import {
   CPUStats,
   DiskSizeStats,
   DiskStats,
-  GraphResponse,
-  LineGraphOptions,
   MemoryStats,
   NetworkStats,
   ProcessedCPUStats,
@@ -16,17 +14,12 @@ import {
   ProcessedMemoryStats,
   ProcessedNetworkStats,
   ProcessedStats,
-  StackedAreaGraphOptions,
   WorkflowJobType
 } from './interfaces'
 import { ReportMetrics } from './reportGenerator'
 import * as logger from './logger'
-import { log } from 'console'
 
 const STAT_SERVER_PORT = 7777
-
-const BLACK = '#000000'
-const WHITE = '#FFFFFF'
 
 async function triggerStatCollect(): Promise<void> {
   logger.debug('Triggering stat collect ...')
@@ -38,180 +31,109 @@ async function triggerStatCollect(): Promise<void> {
   }
 }
 
-async function reportWorkflowMetrics(): Promise<string> {
-  const theme: string = core.getInput('theme', { required: false })
-  let axisColor = BLACK
-  switch (theme) {
-    case 'light':
-      axisColor = BLACK
-      break
-    case 'dark':
-      axisColor = WHITE
-      break
-    default:
-      core.warning(`Invalid theme: ${theme}`)
-  }
+function computeAvg(points: ProcessedStats[]): number {
+  if (!points.length) return 0
+  return points.reduce((sum, p) => sum + p.y, 0) / points.length
+}
 
+function computeMax(points: ProcessedStats[]): number {
+  if (!points.length) return 0
+  return Math.max(...points.map(p => p.y))
+}
+
+function computeSum(points: ProcessedStats[]): number {
+  return points.reduce((sum, p) => sum + p.y, 0)
+}
+
+function fmt(val: number, decimals: number = 1): string {
+  return val.toFixed(decimals)
+}
+
+async function reportWorkflowMetrics(): Promise<string> {
   const { userLoadX, systemLoadX } = await getCPUStats()
   const { activeMemoryX, availableMemoryX } = await getMemoryStats()
   const { networkReadX, networkWriteX } = await getNetworkStats()
   const { diskReadX, diskWriteX } = await getDiskStats()
   const { diskAvailableX, diskUsedX } = await getDiskSizeStats()
 
-  const cpuLoad =
-    userLoadX && userLoadX.length && systemLoadX && systemLoadX.length
-      ? await getStackedAreaGraph({
-          label: 'CPU Load (%)',
-          axisColor,
-          areas: [
-            {
-              label: 'User Load',
-              color: '#e41a1c99',
-              points: userLoadX
-            },
-            {
-              label: 'System Load',
-              color: '#ff7f0099',
-              points: systemLoadX
-            }
-          ]
-        })
-      : null
-
-  const memoryUsage =
-    activeMemoryX &&
-    activeMemoryX.length &&
-    availableMemoryX &&
-    availableMemoryX.length
-      ? await getStackedAreaGraph({
-          label: 'Memory Usage (MB)',
-          axisColor,
-          areas: [
-            {
-              label: 'Used',
-              color: '#377eb899',
-              points: activeMemoryX
-            },
-            {
-              label: 'Free',
-              color: '#4daf4a99',
-              points: availableMemoryX
-            }
-          ]
-        })
-      : null
-
-  const networkIORead =
-    networkReadX && networkReadX.length
-      ? await getLineGraph({
-          label: 'Network I/O Read (MB)',
-          axisColor,
-          line: {
-            label: 'Read',
-            color: '#be4d25',
-            points: networkReadX
-          }
-        })
-      : null
-
-  const networkIOWrite =
-    networkWriteX && networkWriteX.length
-      ? await getLineGraph({
-          label: 'Network I/O Write (MB)',
-          axisColor,
-          line: {
-            label: 'Write',
-            color: '#6c25be',
-            points: networkWriteX
-          }
-        })
-      : null
-
-  const diskIORead =
-    diskReadX && diskReadX.length
-      ? await getLineGraph({
-          label: 'Disk I/O Read (MB)',
-          axisColor,
-          line: {
-            label: 'Read',
-            color: '#be4d25',
-            points: diskReadX
-          }
-        })
-      : null
-
-  const diskIOWrite =
-    diskWriteX && diskWriteX.length
-      ? await getLineGraph({
-          label: 'Disk I/O Write (MB)',
-          axisColor,
-          line: {
-            label: 'Write',
-            color: '#6c25be',
-            points: diskWriteX
-          }
-        })
-      : null
-
-  const diskSizeUsage =
-    diskUsedX && diskUsedX.length && diskAvailableX && diskAvailableX.length
-      ? await getStackedAreaGraph({
-          label: 'Disk Usage (MB)',
-          axisColor,
-          areas: [
-            {
-              label: 'Used',
-              color: '#377eb899',
-              points: diskUsedX
-            },
-            {
-              label: 'Free',
-              color: '#4daf4a99',
-              points: diskAvailableX
-            }
-          ]
-        })
-      : null
-
   const postContentItems: string[] = []
-  if (cpuLoad) {
+
+  // CPU summary
+  if (userLoadX && userLoadX.length) {
+    const peakUser = computeMax(userLoadX)
+    const avgUser = computeAvg(userLoadX)
+    const peakSystem = computeMax(systemLoadX)
+    const avgSystem = computeAvg(systemLoadX)
     postContentItems.push(
       '### CPU Metrics',
-      `![${cpuLoad.id}](${cpuLoad.url})`,
+      '',
+      '| Metric | Peak | Average |',
+      '|---|---|---|',
+      `| User Load | ${fmt(peakUser)}% | ${fmt(avgUser)}% |`,
+      `| System Load | ${fmt(peakSystem)}% | ${fmt(avgSystem)}% |`,
       ''
     )
   }
-  if (memoryUsage) {
+
+  // Memory summary
+  if (activeMemoryX && activeMemoryX.length) {
+    const peakUsed = computeMax(activeMemoryX)
+    const avgUsed = computeAvg(activeMemoryX)
+    const totalMem = activeMemoryX[0].y + (availableMemoryX[0] ? availableMemoryX[0].y : 0)
     postContentItems.push(
       '### Memory Metrics',
-      `![${memoryUsage.id}](${memoryUsage.url})`,
+      '',
+      '| Metric | Value |',
+      '|---|---|',
+      `| Total Memory | ${fmt(totalMem, 0)} MB |`,
+      `| Peak Used | ${fmt(peakUsed, 0)} MB |`,
+      `| Avg Used | ${fmt(avgUsed, 0)} MB |`,
       ''
     )
   }
-  if ((networkIORead && networkIOWrite) || (diskIORead && diskIOWrite)) {
+
+  // IO summary
+  const hasNetwork = networkReadX && networkReadX.length
+  const hasDisk = diskReadX && diskReadX.length
+  if (hasNetwork || hasDisk) {
     postContentItems.push(
       '### IO Metrics',
-      '|               | Read      | Write     |',
-      '|---            |---        |---        |'
+      '',
+      '| Metric | Read | Write |',
+      '|---|---|---|'
     )
+    if (hasNetwork) {
+      postContentItems.push(
+        `| Network I/O | ${fmt(computeSum(networkReadX))} MB | ${fmt(computeSum(networkWriteX))} MB |`
+      )
+    }
+    if (hasDisk) {
+      postContentItems.push(
+        `| Disk I/O | ${fmt(computeSum(diskReadX))} MB | ${fmt(computeSum(diskWriteX))} MB |`
+      )
+    }
+    postContentItems.push('')
   }
-  if (networkIORead && networkIOWrite) {
+
+  // Disk size summary
+  if (diskUsedX && diskUsedX.length && diskAvailableX && diskAvailableX.length) {
+    const lastUsed = diskUsedX[diskUsedX.length - 1].y
+    const lastAvailable = diskAvailableX[diskAvailableX.length - 1].y
     postContentItems.push(
-      `| Network I/O   | ![${networkIORead.id}](${networkIORead.url})        | ![${networkIOWrite.id}](${networkIOWrite.url})        |`
-    )
-  }
-  if (diskIORead && diskIOWrite) {
-    postContentItems.push(
-      `| Disk I/O      | ![${diskIORead.id}](${diskIORead.url})              | ![${diskIOWrite.id}](${diskIOWrite.url})              |`
-    )
-  }
-  if (diskSizeUsage) {
-    postContentItems.push(
-      '### Disk Size Metrics',
-      `![${diskSizeUsage.id}](${diskSizeUsage.url})`,
+      '### Disk Usage',
+      '',
+      '| Metric | Value |',
+      '|---|---|',
+      `| Used | ${fmt(lastUsed, 0)} MB |`,
+      `| Available | ${fmt(lastAvailable, 0)} MB |`,
       ''
     )
   }
+
+  postContentItems.push(
+    '',
+    '> 📊 **Interactive charts with zoom, tooltips, and time range analysis are available in the HTML report artifact.**'
+  )
 
   return postContentItems.join('\n')
 }
@@ -354,71 +276,6 @@ async function getDiskSizeStats(): Promise<ProcessedDiskSizeStats> {
   })
 
   return { diskAvailableX, diskUsedX }
-}
-
-async function getLineGraph(options: LineGraphOptions): Promise<GraphResponse> {
-  const payload = {
-    options: {
-      width: 1000,
-      height: 500,
-      xAxis: {
-        label: 'Time'
-      },
-      yAxis: {
-        label: options.label
-      },
-      timeTicks: {
-        unit: 'auto'
-      }
-    },
-    lines: [options.line]
-  }
-
-  let response = null
-  try {
-    response = await axios.put(
-      'https://api.globadge.com/v1/chartgen/line/time',
-      payload
-    )
-  } catch (error: any) {
-    logger.error(error)
-    logger.error(`getLineGraph ${JSON.stringify(payload)}`)
-  }
-
-  return response?.data
-}
-
-async function getStackedAreaGraph(
-  options: StackedAreaGraphOptions
-): Promise<GraphResponse> {
-  const payload = {
-    options: {
-      width: 1000,
-      height: 500,
-      xAxis: {
-        label: 'Time'
-      },
-      yAxis: {
-        label: options.label
-      },
-      timeTicks: {
-        unit: 'auto'
-      }
-    },
-    areas: options.areas
-  }
-
-  let response = null
-  try {
-    response = await axios.put(
-      'https://api.globadge.com/v1/chartgen/stacked-area/time',
-      payload
-    )
-  } catch (error: any) {
-    logger.error(error)
-    logger.error(`getStackedAreaGraph ${JSON.stringify(payload)}`)
-  }
-  return response?.data
 }
 
 ///////////////////////////
